@@ -110,4 +110,9 @@ public class Reader {
             return readAtom();
         }
     }
+
+    public static Object read(String input) {
+        Reader reader = new Reader(input);
+        return reader.read();
+    }
 }
