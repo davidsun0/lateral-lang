@@ -7,6 +7,10 @@ public class Reader {
     String token;
     int row, column;
 
+    public Reader() {
+        input = "";
+    }
+
     public Reader(String input) {
         this.input = input;
         index = 0;
@@ -80,7 +84,10 @@ public class Reader {
 
     public Object readAtom() {
         String atomStr = nextToken();
-        if('0' <= atomStr.charAt(0) && atomStr.charAt(0) <= '9') {
+        if(atomStr.length() == 0) {
+            // wat
+            return null;
+        } else if('0' <= atomStr.charAt(0) && atomStr.charAt(0) <= '9') {
             return Integer.parseInt(atomStr);
         } else {
             return atomStr;
