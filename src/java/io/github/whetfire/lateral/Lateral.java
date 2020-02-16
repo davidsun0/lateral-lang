@@ -20,20 +20,16 @@ public class Lateral {
                 return;
             }
             Object ast = new StringLispReader(text).readForm();
-            if(ast instanceof LinkedList) {
-                try {
-                    // compile and invoke repl input
-                    MethodBuilder methodBuilder = compiler.compile((LinkedList) ast, new MethodBuilder());
-                    ClassBuilder classBuilder = new ClassBuilder();
-                    classBuilder.addMethod(methodBuilder.resolveBytes(classBuilder));
-                    Class<?> clazz = new LClassLoader().defineClass(classBuilder.toBytes());
-                    Method method = clazz.getMethod("myFunction", (Class<?>[]) null);
-                    System.out.println("=> " + method.invoke(null));
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-            } else {
-                System.out.println(ast);
+            try {
+                // compile and invoke repl input
+                ClassBuilder classBuilder = new ClassBuilder();
+                MethodBuilder methodBuilder = compiler.compileMethod(classBuilder, ast);
+                classBuilder.addMethod(methodBuilder);
+                Class<?> clazz = new LClassLoader().defineClass(classBuilder.toBytes());
+                Method method = clazz.getMethod("myFunction", (Class<?>[]) null);
+                System.out.println("=> " + method.invoke(null));
+            } catch (Exception e) {
+                e.printStackTrace();
             }
         }
     }

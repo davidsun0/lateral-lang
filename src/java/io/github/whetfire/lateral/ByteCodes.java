@@ -1,10 +1,14 @@
 package io.github.whetfire.lateral;
 
+/**
+ * Provides a slightly abstracted view of JVM bytecode.
+ * Each ByteCode object represents a logical JVM operation:
+ * For example, IntConst can be used to push an int of any size - the correct bytecode will be chosen automatically.
+ *
+ * ByteCodes also provides the Label pseudo-code which can contain jump target information.
+ */
 public class ByteCodes {
 
-    /***************************************************************
-     * JAVA BYTECODES                                              *
-     ***************************************************************/
     static abstract class ByteCode {
         abstract int newStackHeight(int stackHeight);
 
@@ -66,8 +70,41 @@ public class ByteCodes {
     static final SimpleByteCode IRETURN = new SimpleByteCode("ireturn", (byte)0xAC, -1);
     static final SimpleByteCode ARETURN = new SimpleByteCode("areturn", (byte)0xB0, 1);
 
+    static final SimpleByteCode POP = new SimpleByteCode("pop", (byte)0x57, -1);
+    static final SimpleByteCode DUP = new SimpleByteCode("dup", (byte)0x59, 1);
+
     static final SimpleByteCode IADD = new SimpleByteCode("iadd", (byte)0x60, 1);
     static final SimpleByteCode IMUL = new SimpleByteCode("imul", (byte)0x68, 1);
+
+    static class Ldc extends ByteCode {
+        short index;
+
+        Ldc(ClassBuilder classBuilder, ConstantPool.ConstantEntry resource) {
+            index = classBuilder.getPool().put(resource);
+        }
+
+        byte[] resolveBytes(ClassBuilder builder) {
+            if(index < 256) {
+                byte[] bytes = new byte[2];
+                bytes[0] = (byte)0x12;
+                bytes[1] = (byte)index;
+                return bytes;
+            } else {
+                byte[] bytes = new byte[3];
+                bytes[0] = (byte)0x13;
+                Utils.putShort(bytes, 1, index);
+                return bytes;
+            }
+        }
+
+        int byteLength() {
+            return index < 256 ? 2 : 3;
+        }
+
+        int newStackHeight(int stackHeight) {
+            return stackHeight + 1;
+        }
+    }
 
     static class Label extends ByteCode {
         int stackHeight;
@@ -80,10 +117,13 @@ public class ByteCodes {
             byteCodePosition = -1;
         }
 
-        void setValues(int stackHeight, int localCount, int byteCodeOffset) {
+        void setValues(int stackHeight, int localCount) {
             this.stackHeight = stackHeight;
             this.localCount = localCount;
-            this.byteCodePosition = byteCodeOffset;
+        }
+
+        void setByteCodePosition(int byteCodePosition){
+            this.byteCodePosition = byteCodePosition;
         }
 
         byte[] resolveBytes() {
@@ -91,11 +131,11 @@ public class ByteCodes {
         }
 
         int newStackHeight(int stackHeight) {
-            return stackHeight;
+            return this.stackHeight;
         }
 
         int newLocalCount(int localCount) {
-            return localCount;
+            return this.localCount;
         }
 
         int byteLength() {
@@ -129,18 +169,17 @@ public class ByteCodes {
         }
 
         byte[] resolveBytes(ClassBuilder builder) {
-            // TODO: somehow calculate byte currentOffset
             byte[] bytes = new byte[3];
             bytes[0] = ID;
-            System.out.printf("if stats: target: %d here: %d%n", target.byteCodePosition, currentOffset);
+            // System.out.printf("if stats: target: %d here: %d%n", target.byteCodePosition, currentOffset);
             short relJump = (short)(target.byteCodePosition - currentOffset);
             Utils.putShort(bytes, 1, relJump);
             return bytes;
         }
 
         int newStackHeight(int stackHeight) {
-            // TODO: return label's stack info
-            return 0;
+            // TODO: assert target's stack height is the same
+            return stackHeight - 1;
         }
 
         int byteLength() {
@@ -149,6 +188,36 @@ public class ByteCodes {
 
         public String toString() {
             return "ifnull " + target;
+        }
+    }
+
+    static class IfNonNull extends Jump {
+        static final byte ID = (byte)0xC7;
+
+        IfNonNull(Label label) {
+            target = label;
+        }
+
+        byte[] resolveBytes(ClassBuilder builder) {
+            byte[] bytes = new byte[3];
+            bytes[0] = ID;
+            // System.out.printf("if stats: target: %d here: %d%n", target.byteCodePosition, currentOffset);
+            short relJump = (short)(target.byteCodePosition - currentOffset);
+            Utils.putShort(bytes, 1, relJump);
+            return bytes;
+        }
+
+        int newStackHeight(int stackHeight) {
+            // TODO: assert target's stack height is the same
+            return stackHeight - 1;
+        }
+
+        int byteLength() {
+            return 3;
+        }
+
+        public String toString() {
+            return "ifnonnull " + target;
         }
     }
 
@@ -171,7 +240,7 @@ public class ByteCodes {
 
         int newStackHeight(int stackHeight) {
             // TODO: return label's stack info
-            return 0;
+            return stackHeight;
         }
 
         int byteLength() {
@@ -183,11 +252,11 @@ public class ByteCodes {
         }
     }
 
-    static class IntConstOp extends ByteCode {
+    static class IntConst extends ByteCode {
         int val;
         byte[] bytes;
 
-        IntConstOp(int val) {
+        IntConst(int val) {
             this.val = val;
 
             if(-1 <= val && val <= 5) {
@@ -219,9 +288,17 @@ public class ByteCodes {
     static class InvokeStatic extends ByteCode {
         static final byte ID = (byte)0xB8;
         ConstantPool.MethodRefInfo methodRefInfo;
+        int stackDiff;
 
         InvokeStatic(String className, String methodName, String methodType) {
             methodRefInfo = new ConstantPool.MethodRefInfo(className, methodName, methodType);
+            stackDiff = 0;
+        }
+
+        // stack change should be calculated from method type
+        InvokeStatic(String className, String methodName, String methodType, int stackDiff) {
+            methodRefInfo = new ConstantPool.MethodRefInfo(className, methodName, methodType);
+            this.stackDiff = stackDiff;
         }
 
         byte[] resolveBytes(ClassBuilder builder) {
@@ -234,7 +311,7 @@ public class ByteCodes {
         }
 
         int newStackHeight(int stackHeight) {
-            return 0;
+            return stackHeight + stackDiff;
         }
 
         int byteLength() {

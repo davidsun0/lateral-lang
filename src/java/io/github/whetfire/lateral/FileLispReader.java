@@ -24,20 +24,11 @@ public class FileLispReader extends LispReader {
 
     protected void nextChar() {
         try {
-            // readForm returns -1 at end of stream
+            // read returns -1 at end of stream
             buffer = fileStream.read();
         } catch (IOException e) {
             e.printStackTrace();
             buffer = -1;
-        }
-    }
-
-    public static void main(String[] args) {
-        try {
-            FileLispReader reader = new FileLispReader("./src/lisp/test.lisp");
-            System.out.println(reader.readForm());
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
         }
     }
 }

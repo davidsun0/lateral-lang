@@ -7,7 +7,7 @@ public class Lang {
         if(a == null)
             return a;
         else if(a instanceof LinkedList)
-            return LinkedList.value((LinkedList) a);
+            return LinkedList.first((LinkedList) a);
         else
             throw new TypeException(LinkedList.class, a.getClass());
     }

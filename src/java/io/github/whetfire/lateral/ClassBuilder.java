@@ -27,7 +27,9 @@ public class ClassBuilder {
     }
 
     void addMethod(MethodBuilder methodBuilder) {
-        methods.add(methodBuilder.resolveBytes(this));
+        if(methodBuilder.parentClass != this)
+            throw new RuntimeException("Attempting to put method in wrong class");
+        methods.add(methodBuilder.resolveBytes());
     }
 
     public byte[] toBytes() {

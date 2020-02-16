@@ -9,13 +9,15 @@ public class MethodBuilder {
     ArrayList<ByteCode> byteCodes;
     ArrayList<Label> stackFrameTable;
     short maxStack, maxLocals;
+    ClassBuilder parentClass;
 
-    MethodBuilder() {
+    MethodBuilder(ClassBuilder builder) {
         byteCodes = new ArrayList<>();
         stackFrameTable = new ArrayList<>();
+        parentClass = builder;
     }
 
-    public byte[] resolveBytes(ClassBuilder parentClass) {
+    public byte[] resolveBytes() {
         ConstantPool pool = parentClass.getPool();
         ArrayList<Byte> bytes = new ArrayList<>();
         // u2 accessor flags
@@ -34,7 +36,7 @@ public class MethodBuilder {
         Utils.putShort(bytes, (short)1);
 
         // CODE ATTRIBUTE
-        byte[] byteCodes = assemble(parentClass);
+        byte[] byteCodes = assemble();
         byte[] stackMapTable = makeStackMapTable(parentClass);
         Utils.putShort(bytes, pool.put(ConstantPool.CODE_NAME));
         Utils.putInt(bytes, 12 + byteCodes.length + stackMapTable.length);
@@ -59,17 +61,30 @@ public class MethodBuilder {
         byteCodes.add(code);
     }
 
-    private byte[] assemble(ClassBuilder classBuilder) {
+    private byte[] assemble() {
         int maxStack = 0;
         int maxLocals = 0; // TODO: set to argument count
-        // first assembly pass: resolve labels
 
+        // first assembly pass: resolve labels
         int localCount = 0;
         int stackHeight = 0;
         int offset = 0;
-
         for(ByteCode code : byteCodes) {
-            System.out.printf("stack height: %d%n", stackHeight);
+            /*
+            resolve labels first because jump / labels depend on
+            stack / offset values at the start of the instruction
+             */
+            if (code instanceof Jump) {
+                ((Jump) code).setCurrentOffset(offset);
+                Label target = ((Jump) code).target;
+                stackFrameTable.add(target);
+                target.setValues(code.newStackHeight(stackHeight), localCount);
+                // System.out.printf("position: %d, locals: %d, stack: %d%n", target.byteCodePosition, target.localCount, target.stackHeight);
+            } else if (code instanceof Label) {
+                ((Label) code).setByteCodePosition(offset);
+            }
+
+            System.out.printf("[%d sh]%n", stackHeight);
             // calculate stack / local usage
             stackHeight = code.newStackHeight(stackHeight);
             localCount = code.newLocalCount(localCount);
@@ -79,21 +94,13 @@ public class MethodBuilder {
                 maxLocals = localCount;
             System.out.print(offset + ": ");
             System.out.println(code);
-
-            // resolve labels
-            if(code instanceof Label) {
-                ((Label) code).setValues(stackHeight, localCount, offset);
-            } else if (code instanceof Jump) {
-                ((Jump) code).setCurrentOffset(offset);
-                stackFrameTable.add(((Jump) code).target);
-            }
             offset += code.byteLength();
         }
 
-        // second pass
+        // second pass: generate bytes
         ArrayList<Byte> bytes = new ArrayList<>();
         for(ByteCode code : byteCodes) {
-            Utils.appendBytes(bytes, code.resolveBytes(classBuilder));
+            Utils.appendBytes(bytes, code.resolveBytes(parentClass));
         }
         this.maxLocals = (short)maxLocals;
         this.maxStack = (short)maxStack;
@@ -111,6 +118,22 @@ public class MethodBuilder {
             return new byte[0];
         }
 
+        // sort by bytecode position and remove duplicates
+        stackFrameTable.sort(Comparator.comparingInt(Label::getByteCodePosition));
+        {
+            int i = 1;
+            while (i < stackFrameTable.size()) {
+                if (stackFrameTable.get(i) == stackFrameTable.get(i - 1)) {
+                    stackFrameTable.remove(i);
+                } else {
+                    i++;
+                }
+            }
+            for(Label frame : stackFrameTable) {
+                System.out.println(frame);
+            }
+        }
+
         // write header
         ArrayList<Byte> bytes = new ArrayList<>();
         Utils.putShort(bytes, classBuilder.getPool().put(ConstantPool.STACKMAP_NAME));
@@ -122,10 +145,10 @@ public class MethodBuilder {
         objectVerification[0] = 7; // object info ID
         Utils.putShort(objectVerification, 1, classBuilder.getPool().put(new ConstantPool.ClassInfo("java/lang/Object")));
 
-        stackFrameTable.sort(Comparator.comparingInt(Label::getByteCodePosition));
         int lastLocal = 0; // TODO: set to argument count
         int lastPosition = -1;
         for(Label label : stackFrameTable) {
+            System.out.printf("position: %d, locals: %d, stack: %d%n", label.byteCodePosition, label.localCount, label.stackHeight);
             int offset = label.byteCodePosition - lastPosition - 1;
             if (label.stackHeight == 0 && label.localCount == lastLocal) {
                 if (offset < 64) {

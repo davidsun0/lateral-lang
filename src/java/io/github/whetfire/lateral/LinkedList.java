@@ -29,7 +29,7 @@ public class LinkedList {
         return res;
     }
 
-    public static Object value(LinkedList list) {
+    public static Object first(LinkedList list) {
         return list == null ? null : list.value;
     }
 
@@ -38,15 +38,15 @@ public class LinkedList {
     }
 
     public static Object second(LinkedList list) {
-        return value(next(list));
+        return first(next(list));
     }
 
     public static Object third(LinkedList list) {
-        return value(next(next(list)));
+        return first(next(next(list)));
     }
 
     public static Object fourth(LinkedList list) {
-        return value(next(next(next(list))));
+        return first(next(next(next(list))));
     }
 
     public static LinkedList prepend(Object value, LinkedList head) {

@@ -125,6 +125,35 @@ public class ConstantPool {
         }
     }
 
+    static class StringInfo extends ConstantEntry {
+        static final byte ID = 8;
+        String value;
+
+        StringInfo(String value) {
+            this.value = value;
+        }
+
+        byte[] resolveBytes(ConstantPool pool) {
+            short valueIndex = pool.put(new UTF8Info(value));
+            byte[] bytes = new byte[3];
+            bytes[0] = ID;
+            Utils.putShort(bytes, 1, valueIndex);
+            return bytes;
+        }
+
+        public int hashCode() {
+            return value.hashCode();
+        }
+
+        public boolean equals(Object obj) {
+            if(obj == this) {
+                return true;
+            } else {
+                return obj instanceof StringInfo && value.equals(((StringInfo) obj).value);
+            }
+        }
+    }
+
     static class ClassInfo extends ConstantEntry {
         static final byte ID = 7;
         String name;
