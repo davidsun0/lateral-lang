@@ -5,7 +5,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 
 public class Utils {
-    public static byte[] toBytes(ArrayList<Byte> bytes) {
+    public static byte[] toByteArray(ArrayList<Byte> bytes) {
         byte[] result = new byte[bytes.size()];
         for(int i = 0; i < bytes.size(); i ++) {
             result[i] = bytes.get(i);

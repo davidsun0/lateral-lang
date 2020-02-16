@@ -15,6 +15,9 @@ public class ConstantPool {
     private ArrayList<Byte> entryBytes;
     private short entryCount;
 
+    public static UTF8Info CODE_NAME = new UTF8Info("Code");
+    public static UTF8Info STACKMAP_NAME = new UTF8Info("StackMapTable");
+
     ConstantPool(){
         entries = new HashMap<>();
         entryBytes = new ArrayList<>();
@@ -82,7 +85,7 @@ public class ConstantPool {
     }
 
     static class UTF8Info extends ConstantEntry {
-        static byte ID = 1;
+        static final byte ID = 1;
         String value;
 
         UTF8Info(String value) {
@@ -123,7 +126,7 @@ public class ConstantPool {
     }
 
     static class ClassInfo extends ConstantEntry {
-        static byte ID = 7;
+        static final byte ID = 7;
         String name;
 
         ClassInfo(String name) {
@@ -163,7 +166,7 @@ public class ConstantPool {
     }
 
     static class NameAndTypeInfo extends ConstantEntry {
-        static byte ID = 12;
+        static final byte ID = 12;
         String name;
         String type;
 
@@ -190,10 +193,8 @@ public class ConstantPool {
 
         @Override
         byte[] resolveBytes(ConstantPool pool) {
-            UTF8Info nameDep = new UTF8Info(name);
-            short nameIndex = pool.put(nameDep);
-            UTF8Info typeDep = new UTF8Info(name);
-            short typeIndex = pool.put(typeDep);
+            short nameIndex = pool.put(new UTF8Info(name));
+            short typeIndex = pool.put(new UTF8Info(type));
 
             byte[] bytes = new byte[5];
             bytes[0] = ID;
@@ -205,16 +206,14 @@ public class ConstantPool {
         }
     }
 
-    /*
-     * FieldRef and InterfaceMethodRef are the same, except with tag ID 9 and 11 respectively
-     */
-    static class MethodRefInfo extends ConstantEntry {
-        static byte ID = 10;
+    static class FieldRefInfo extends ConstantEntry {
+        static final byte ID = 0x09;
         ClassInfo cinfo;
         NameAndTypeInfo nameType;
 
-        MethodRefInfo(){
-
+        FieldRefInfo(String className, String methodName, String methodType) {
+            cinfo = new ClassInfo(className);
+            nameType = new NameAndTypeInfo(methodName, methodType);
         }
 
         @Override
@@ -247,10 +246,63 @@ public class ConstantPool {
                         (nameType.equals(((MethodRefInfo) obj).nameType));
             }
         }
+
+        public String toString() {
+            return String.format("%s.%s:%s", cinfo.name, nameType.name, nameType.type);
+        }
+    }
+
+    /*
+     * FieldRef and InterfaceMethodRef are the same, except with tag ID 9 and 11 respectively
+     */
+    static class MethodRefInfo extends ConstantEntry {
+        static final byte ID = 0x0A;
+        ClassInfo cinfo;
+        NameAndTypeInfo nameType;
+
+        MethodRefInfo(String className, String methodName, String methodType) {
+            cinfo = new ClassInfo(className);
+            nameType = new NameAndTypeInfo(methodName, methodType);
+        }
+
+        @Override
+        byte[] resolveBytes(ConstantPool pool) {
+            byte[] bytes = new byte[5];
+            bytes[0] = ID;
+
+            short cinfoIndex = pool.put(cinfo);
+            bytes[1] = (byte)((cinfoIndex >> 8) & 0xFF);
+            bytes[2] = (byte)(cinfoIndex & 0xFF);
+
+            short nameTypeIndex = pool.put(nameType);
+            bytes[3] = (byte)((nameTypeIndex >> 8) & 0xFF);
+            bytes[4] = (byte)(nameTypeIndex& 0xFF);
+            return bytes;
+        }
+
+        @Override
+        public int hashCode() {
+            return cinfo.hashCode() + nameType.hashCode();
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if(this == obj) {
+                return true;
+            } else {
+                return (obj instanceof MethodRefInfo) &&
+                        (cinfo.equals(((MethodRefInfo) obj).cinfo)) &&
+                        (nameType.equals(((MethodRefInfo) obj).nameType));
+            }
+        }
+
+        public String toString() {
+            return String.format("%s.%s:%s", cinfo.name, nameType.name, nameType.type);
+        }
     }
 
     static class MethodHandleInfo extends ConstantEntry {
-        static byte ID = 15;
+        static final byte ID = 15;
         short referenceKind;
         short referenceIndex;
 
@@ -283,7 +335,7 @@ public class ConstantPool {
     }
 
     static class InvokeDynamicInfo extends ConstantEntry {
-        static byte ID = 18;
+        static final byte ID = 18;
         short bootstrapIndex;
         NameAndTypeInfo nameType;
 

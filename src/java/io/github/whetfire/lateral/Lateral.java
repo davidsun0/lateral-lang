@@ -19,14 +19,14 @@ public class Lateral {
                 System.out.println("Bye bye! ('v' )/");
                 return;
             }
-            Object ast = new Reader(text).read();
+            Object ast = new StringLispReader(text).readForm();
             if(ast instanceof LinkedList) {
                 try {
                     // compile and invoke repl input
-                    MethodGenerator methodGenerator = compiler.compile((LinkedList) ast, new MethodGenerator());
-                    ClassGenerator classGenerator = new ClassGenerator();
-                    classGenerator.addMethod(methodGenerator.resolveBytes(classGenerator.pool));
-                    Class<?> clazz = new LClassLoader().defineClass(classGenerator.toBytes());
+                    MethodBuilder methodBuilder = compiler.compile((LinkedList) ast, new MethodBuilder());
+                    ClassBuilder classBuilder = new ClassBuilder();
+                    classBuilder.addMethod(methodBuilder.resolveBytes(classBuilder));
+                    Class<?> clazz = new LClassLoader().defineClass(classBuilder.toBytes());
                     Method method = clazz.getMethod("myFunction", (Class<?>[]) null);
                     System.out.println("=> " + method.invoke(null));
                 } catch (Exception e) {

@@ -9,14 +9,6 @@ public class LinkedList {
         this.next = next;
     }
 
-    public static LinkedList makeList(Object ... values) {
-        LinkedList res = null;
-        for (int i = values.length - 1; i >= 0; i--) {
-            res = new LinkedList(values[i], res);
-        }
-        return res;
-    }
-
     public Object getValue() {
         return value;
     }
@@ -29,11 +21,32 @@ public class LinkedList {
         return next;
     }
 
+    public static LinkedList makeList(Object ... values) {
+        LinkedList res = null;
+        for (int i = values.length - 1; i >= 0; i--) {
+            res = new LinkedList(values[i], res);
+        }
+        return res;
+    }
+
+    public static Object value(LinkedList list) {
+        return list == null ? null : list.value;
+    }
+
     public static LinkedList next(LinkedList list) {
-        if(list == null)
-            return null;
-        else
-            return list.next;
+        return list == null ? null : list.next;
+    }
+
+    public static Object second(LinkedList list) {
+        return value(next(list));
+    }
+
+    public static Object third(LinkedList list) {
+        return value(next(next(list)));
+    }
+
+    public static Object fourth(LinkedList list) {
+        return value(next(next(next(list))));
     }
 
     public static LinkedList prepend(Object value, LinkedList head) {

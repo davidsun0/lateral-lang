@@ -1,39 +1,16 @@
 package io.github.whetfire.lateral;
 
-public class Reader {
-    int index;
-    String input;
-
-    String token;
+public abstract class LispReader {
+    private String token;
     int row, column;
 
-    public Reader() {
-        input = "";
-    }
+    private static String OPEN_PAREN = "(";
+    private static String CLOSE_PAREN = ")";
+    abstract protected boolean hasNextChar();
+    abstract protected char peekChar();
+    abstract protected void nextChar();
 
-    public Reader(String input) {
-        this.input = input;
-        index = 0;
-
-        row = 0;
-        column = 0;
-    }
-
-    public char nextChar() {
-        char ret = input.charAt(index);
-        index ++;
-        return ret;
-    }
-
-    public char peekChar() {
-        return input.charAt(index);
-    }
-
-    public boolean hasNextChar() {
-        return input.length() > index;
-    }
-
-    public String peekToken() {
+    private String peekToken() {
         if(token != null)
             return token;
 
@@ -43,15 +20,21 @@ public class Reader {
         while(hasNextChar()) {
             char c = peekChar();
             column ++;
+            if(start) {
+                if(c == '(') {
+                    nextChar();
+                    token = OPEN_PAREN;
+                    return token;
+                } else if(c == ')') {
+                    nextChar();
+                    token = CLOSE_PAREN;
+                    return token;
+                }
+            }
             switch(c){
                 case '(':
                 case ')':
-                    if (start) {
-                        sb.append(c);
-                        nextChar();
-                    }
                     break readToken;
-
                 case '\n':
                     row ++;
                     column = 0;
@@ -72,17 +55,17 @@ public class Reader {
         return token;
     }
 
-    public String nextToken() {
+    private String nextToken() {
         String ret = token == null ? peekToken() : token;
         token = null;
         return ret;
     }
 
-    public boolean hasNextToken() {
+    private boolean hasNextToken() {
         return !"".equals(peekToken());
     }
 
-    public Object readAtom() {
+    private Object readAtom() {
         String atomStr = nextToken();
         if(atomStr.length() == 0) {
             // wat
@@ -90,36 +73,31 @@ public class Reader {
         } else if('0' <= atomStr.charAt(0) && atomStr.charAt(0) <= '9') {
             return Integer.parseInt(atomStr);
         } else {
-            return atomStr;
+            return Symbol.makeSymbol(atomStr);
         }
     }
 
-    public Object readList() {
+    private Object readList() {
         LinkedList list = null;
         nextToken(); // consume the open parenthesis
         while(hasNextToken()) {
             String peekToken = peekToken();
-            if(")".equals(peekToken)) {
+            if(CLOSE_PAREN.equals(peekToken)) {
                 nextToken();
                 return LinkedList.reverseD(list);
             }
-            list = LinkedList.prepend(read(), list);
+            list = LinkedList.prepend(readForm(), list);
         }
-        System.err.println("failed to read list");
-        return null;
+        throw new RuntimeException("Failed to read list");
     }
 
-    public Object read() {
+    public Object readForm() {
         String token = peekToken();
-        if("(".equals(token)) {
+        if(OPEN_PAREN.equals(token)) {
             return readList();
         } else {
             return readAtom();
         }
     }
 
-    public static Object read(String input) {
-        Reader reader = new Reader(input);
-        return reader.read();
-    }
 }
