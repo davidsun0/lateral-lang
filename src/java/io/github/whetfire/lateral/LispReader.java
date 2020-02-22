@@ -4,15 +4,55 @@ public abstract class LispReader {
     private String token;
     int row, column;
 
-    private static String OPEN_PAREN = "(";
-    private static String CLOSE_PAREN = ")";
     abstract protected boolean hasNextChar();
     abstract protected char peekChar();
     abstract protected void nextChar();
 
+    private String consumeString() {
+        StringBuilder sb = new StringBuilder();
+        sb.append('\"');
+        nextChar(); // consume initial open quote
+        while(hasNextChar()) {
+            char c = peekChar();
+            if(c == '\"') {
+                sb.append('\"');
+                break;
+            }
+            sb.append(c);
+            nextChar();
+        }
+        return sb.toString();
+    }
+
+    private void consumeComment() {
+        while(hasNextChar()) {
+            char c = peekChar();
+            if(c == '\n') {
+                break;
+            }
+            nextChar();
+        }
+    }
+
+    private void consumeWhitespace() {
+        while(hasNextChar()) {
+            char c = peekChar();
+            if(c != ' ' && c != '\n') {
+                break;
+            }
+            nextChar();
+        }
+    }
+
     private String peekToken() {
         if(token != null)
             return token;
+
+        if(!hasNextChar()) {
+            // uhh do something here
+        }
+
+        consumeWhitespace();
 
         StringBuilder sb = new StringBuilder();
         boolean start = true;
@@ -20,30 +60,33 @@ public abstract class LispReader {
         while(hasNextChar()) {
             char c = peekChar();
             column ++;
-            if(start) {
-                if(c == '(') {
-                    nextChar();
-                    token = OPEN_PAREN;
-                    return token;
-                } else if(c == ')') {
-                    nextChar();
-                    token = CLOSE_PAREN;
-                    return token;
-                }
-            }
+
             switch(c){
                 case '(':
                 case ')':
+                    if(start) {
+                        nextChar();
+                        sb.append(c);
+                    }
                     break readToken;
+                // whitespace
                 case '\n':
                     row ++;
                     column = 0;
                 case ' ':
-                    if (!start) {
+                    if(start)
+                        break;
+                    else
                         break readToken;
-                    }
+                case ';':
+                    consumeComment();
                     break;
-
+                case '\"':
+                    if(start) {
+                        sb.append(consumeString());
+                        nextChar();
+                    }
+                    break readToken;
                 default:
                     start = false;
                     sb.append(c);
@@ -68,10 +111,13 @@ public abstract class LispReader {
     private Object readAtom() {
         String atomStr = nextToken();
         if(atomStr.length() == 0) {
-            // wat
-            return null;
+            throw new RuntimeException("Can't read empty atom");
         } else if('0' <= atomStr.charAt(0) && atomStr.charAt(0) <= '9') {
             return Integer.parseInt(atomStr);
+        } else if(':' == atomStr.charAt(0)) {
+            return Keyword.makeKeyword(atomStr.substring(1));
+        } else if('\"' == atomStr.charAt(0)) {
+            return atomStr.substring(1, atomStr.length() - 1);
         } else {
             return Symbol.makeSymbol(atomStr);
         }
@@ -82,7 +128,7 @@ public abstract class LispReader {
         nextToken(); // consume the open parenthesis
         while(hasNextToken()) {
             String peekToken = peekToken();
-            if(CLOSE_PAREN.equals(peekToken)) {
+            if(")".equals(peekToken)) {
                 nextToken();
                 return LinkedList.reverseD(list);
             }
@@ -92,12 +138,15 @@ public abstract class LispReader {
     }
 
     public Object readForm() {
-        String token = peekToken();
-        if(OPEN_PAREN.equals(token)) {
-            return readList();
+        if(hasNextToken()) {
+            String token = peekToken();
+            if ("(".equals(token)) {
+                return readList();
+            } else {
+                return readAtom();
+            }
         } else {
-            return readAtom();
+            return null;
         }
     }
-
 }

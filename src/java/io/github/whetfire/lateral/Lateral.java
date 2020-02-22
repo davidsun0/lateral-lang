@@ -7,8 +7,8 @@ import java.util.Scanner;
 public class Lateral {
 
     public static void main(String[] args) {
+        /*
         Scanner scanner = new Scanner(System.in);
-        Compiler compiler = new Compiler();
         while(true) {
             System.out.print("> ");
             String text;
@@ -23,8 +23,8 @@ public class Lateral {
             try {
                 // compile and invoke repl input
                 ClassBuilder classBuilder = new ClassBuilder();
-                MethodBuilder methodBuilder = compiler.compileMethod(classBuilder, ast);
-                classBuilder.addMethod(methodBuilder);
+                Compiler compiler = new Compiler(classBuilder.makeMethodBuilder());
+                compiler.compileMethod(ast);
                 Class<?> clazz = new LClassLoader().defineClass(classBuilder.toBytes());
                 Method method = clazz.getMethod("myFunction", (Class<?>[]) null);
                 System.out.println("=> " + method.invoke(null));
@@ -32,5 +32,6 @@ public class Lateral {
                 e.printStackTrace();
             }
         }
+        */
     }
 }

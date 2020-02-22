@@ -1,8 +1,32 @@
-(if t (quote (1 2 nil)) (quote asdf))
+(defun nil? (p)
+  (if p nil t))
 
-(or nil 1 2 t)
+(defun not (p)
+  (nil? p))
 
-(cons nil (if nil t nil))
+(defun last (lst)
+  (if (cdr lst)
+    (last (cdr lst))
+    (car lst)))
 
-(cons t (cons nil nil))
-(if (if t t nil) t nil)
+;(defmacro mclass (name)
+;  (class name))
+
+; a and b are top of stack
+; ..., a, b ->
+; ..., (cons a b)
+(defasm cons (a b)
+  (let (endlab (makeLabel))
+    (:dup ; dup b
+     (:ifnull endlab)
+     :dup
+     (:instanceof LinkedList)
+     (:iftrue endlab)
+     ; somehow load the exception
+     :athrow
+     (:label endlab)
+     (:new LinkedList)
+     (:invokevirtual <init>))))
+
+(defun main ()
+  (car (cons :hello nil)))

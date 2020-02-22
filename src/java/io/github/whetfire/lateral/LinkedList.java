@@ -1,6 +1,8 @@
 package io.github.whetfire.lateral;
 
-public class LinkedList {
+import java.util.Iterator;
+
+public class LinkedList implements Iterable<Object>{
     private Object value;
     private LinkedList next;
 
@@ -72,6 +74,8 @@ public class LinkedList {
      * @return The head of the reversed list
      */
     public static LinkedList reverseD(LinkedList head) {
+        if(head == null)
+            return null;
         LinkedList prev = null;
         LinkedList next = head.next;
         while(head != null) {
@@ -103,5 +107,27 @@ public class LinkedList {
         }
         builder.append(')');
         return builder.toString();
+    }
+
+    static class LinkedListIterator implements Iterator<Object>{
+        LinkedList list;
+
+        LinkedListIterator(LinkedList list) {
+            this.list = list;
+        }
+
+        public boolean hasNext() {
+            return list != null;
+        }
+
+        public Object next() {
+            Object ret = list.getValue();
+            list = LinkedList.next(list);
+            return ret;
+        }
+    }
+
+    public Iterator<Object> iterator() {
+        return new LinkedListIterator(this);
     }
 }

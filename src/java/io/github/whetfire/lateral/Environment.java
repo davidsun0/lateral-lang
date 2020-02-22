@@ -7,7 +7,11 @@ public class Environment {
     private Map<Symbol, Object> symMap;
 
     Environment() {
-        symMap = new HashMap<>(256);
+        symMap = new HashMap<>();
+    }
+
+    Environment(int initialCapacity) {
+        symMap = new HashMap<>(initialCapacity);
     }
 
     public void insert(Symbol symbol, Object obj) {

@@ -10,7 +10,8 @@ public class ClassBuilder {
     static byte[] version = {0, 0, 0, 55}; // 55.0 = java 11
 
     private ConstantPool pool;
-    private ArrayList<byte[]> methods;
+    // private ArrayList<byte[]> methods;
+    private ArrayList<MethodBuilder> methods;
     private byte[] compiledBytes = null;
 
     ClassBuilder(){
@@ -22,14 +23,10 @@ public class ClassBuilder {
         return pool;
     }
 
-    void addMethod(byte[] bytes) {
-        methods.add(bytes);
-    }
-
-    void addMethod(MethodBuilder methodBuilder) {
-        if(methodBuilder.parentClass != this)
-            throw new RuntimeException("Attempting to put method in wrong class");
-        methods.add(methodBuilder.resolveBytes());
+    public MethodBuilder makeMethodBuilder() {
+        MethodBuilder methodBuilder = new MethodBuilder(this);
+        methods.add(methodBuilder);
+        return methodBuilder;
     }
 
     public byte[] toBytes() {
@@ -39,7 +36,10 @@ public class ClassBuilder {
         // TODO: generate class names
         short objIdx = pool.put(new ConstantPool.ClassInfo("java/lang/Object"));
         short clsIdx = pool.put(new ConstantPool.ClassInfo("MyClass"));
-        // System.out.println(pool);
+        ArrayList<byte[]> methodBytes = new ArrayList<>(methods.size());
+        for(MethodBuilder method : methods) {
+            methodBytes.add(method.resolveBytes());
+        }
 
         ArrayList<Byte> bytes = new ArrayList<>();
         Utils.appendBytes(bytes, header);
@@ -55,8 +55,8 @@ public class ClassBuilder {
 
         // METHODS
         Utils.putShort(bytes, (short)methods.size()); // number of methods
-        for(byte[] methodBytes : methods) {
-            Utils.appendBytes(bytes, methodBytes);
+        for(byte[] methodByte : methodBytes) {
+            Utils.appendBytes(bytes, methodByte);
         }
 
         // TODO: generate attributes

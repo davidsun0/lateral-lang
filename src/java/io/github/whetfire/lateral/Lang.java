@@ -7,7 +7,7 @@ public class Lang {
         if(a == null)
             return a;
         else if(a instanceof LinkedList)
-            return LinkedList.first((LinkedList) a);
+            return ((LinkedList) a).getValue();
         else
             throw new TypeException(LinkedList.class, a.getClass());
     }
@@ -16,7 +16,7 @@ public class Lang {
         if(a == null)
             return a;
         else if(a instanceof LinkedList)
-            return LinkedList.next((LinkedList) a);
+            return ((LinkedList) a).getNext();
         else
             throw new TypeException(LinkedList.class, a.getClass());
     }
@@ -26,6 +26,19 @@ public class Lang {
             return new LinkedList(a, (LinkedList) b);
         else
             throw new TypeException(LinkedList.class, a.getClass());
+    }
+
+    public static Object clazz(Object a) {
+        try {
+            return Class.forName((String) a);
+        } catch (ClassNotFoundException c) {
+            c.printStackTrace();
+        }
+        return null;
+    }
+
+    public static Object cond(Object ast) {
+        return ast;
     }
 
     public static Integer sum(Integer a, Integer b) {
