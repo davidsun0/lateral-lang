@@ -25,7 +25,7 @@ public class Lateral {
                 ClassBuilder classBuilder = new ClassBuilder();
                 Compiler compiler = new Compiler(classBuilder.makeMethodBuilder());
                 compiler.compileMethod(ast);
-                Class<?> clazz = new LClassLoader().defineClass(classBuilder.toBytes());
+                Class<?> clazz = new ClassDefiner().defineClass(classBuilder.toBytes());
                 Method method = clazz.getMethod("myFunction", (Class<?>[]) null);
                 System.out.println("=> " + method.invoke(null));
             } catch (Exception e) {

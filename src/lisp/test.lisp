@@ -1,32 +1,13 @@
-(defun nil? (p)
-  (if p nil t))
+(cons 1 nil)
 
-(defun not (p)
-  (nil? p))
+3
 
-(defun last (lst)
-  (if (cdr lst)
-    (last (cdr lst))
-    (car lst)))
+"hello world"
 
-;(defmacro mclass (name)
-;  (class name))
+(defmacro x (y)
+  (cons y (cons 1 (cons (quote nil) nil))))
 
-; a and b are top of stack
-; ..., a, b ->
-; ..., (cons a b)
-(defasm cons (a b)
-  (let (endlab (makeLabel))
-    (:dup ; dup b
-     (:ifnull endlab)
-     :dup
-     (:instanceof LinkedList)
-     (:iftrue endlab)
-     ; somehow load the exception
-     :athrow
-     (:label endlab)
-     (:new LinkedList)
-     (:invokevirtual <init>))))
+(defun a (b)
+  (x cons))
 
-(defun main ()
-  (car (cons :hello nil)))
+(a 1)

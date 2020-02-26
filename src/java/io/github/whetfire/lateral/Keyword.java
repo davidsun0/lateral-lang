@@ -1,6 +1,6 @@
 package io.github.whetfire.lateral;
 
-public class Keyword {
+public final class Keyword {
     private final String name;
 
     private Keyword(String name) {

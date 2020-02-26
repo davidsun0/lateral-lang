@@ -1,8 +1,15 @@
 package io.github.whetfire.lateral;
 
 import java.lang.invoke.*;
+import java.lang.reflect.Method;
 
 public class Lang {
+    static private int gensymCount = -1;
+    public static Object gensym() {
+        gensymCount ++;
+        return Symbol.makeSymbol("gensym#" + gensymCount);
+    }
+
     public static Object car(Object a) {
         if(a == null)
             return a;
@@ -61,5 +68,25 @@ public class Lang {
             mh = mh.asType(dynMethodType);
         }
         return new ConstantCallSite(mh);
+    }
+
+    public static String jvmClassName(Class clazz) {
+        return 'L' + clazz.getName().replace('.', '/') + ';';
+    }
+
+    public static void main(String[] args) {
+        try {
+            Method m = Lang.class.getMethod("cons", Object.class, Object.class);
+            System.out.println(jvmClassName(m.getDeclaringClass()));
+            System.out.println(m.getName());
+            // System.out.println(m.getParameterTypes());
+            for(Class clazz : m.getParameterTypes()) {
+                System.out.println(jvmClassName(clazz));
+            }
+            System.out.println("return: " + jvmClassName(m.getReturnType()));
+            System.out.println(m);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 }

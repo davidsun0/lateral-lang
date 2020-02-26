@@ -4,7 +4,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class Environment {
-    private Map<Symbol, Object> symMap;
+    protected Map<Symbol, Object> symMap;
 
     Environment() {
         symMap = new HashMap<>();

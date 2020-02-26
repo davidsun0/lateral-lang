@@ -1,11 +1,11 @@
 package io.github.whetfire.lateral;
 
 import java.io.FileNotFoundException;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.*;
 
 public class Compiler {
-    Map<Symbol, LinkedList> functionMap;
     static LinkedList PUSH_TRUE = LinkedList.makeList(
             Keyword.makeKeyword("getstatic"),
             "java/lang/Boolean", "TRUE", "Ljava/lang/Boolean;"
@@ -19,9 +19,7 @@ public class Compiler {
             "io/github/whetfire/lateral/Symbol", "makeSymbol",
             "(Ljava/lang/String;)Lio/github/whetfire/lateral/Symbol;"
     );
-
     static LinkedList CONS;
-
     static Symbol QUOTE_SYM = Symbol.makeSymbol("quote");
     static Symbol IF_SYM = Symbol.makeSymbol("if");
     static Symbol AND_SYM = Symbol.makeSymbol("and");
@@ -29,17 +27,43 @@ public class Compiler {
     static Symbol DEFUN_SYM = Symbol.makeSymbol("defun");
     static Symbol DEFMACRO_SYM = Symbol.makeSymbol("defmacro");
     static Symbol LET_SYM = Symbol.makeSymbol("let");
-
-    MethodBuilder methodBuilder;
+    static Symbol ASM_SYM = Symbol.makeSymbol("asm");
 
     static {
         String langClass = "io/github/whetfire/lateral/Lang";
         String objClass = "java/lang/Object";
-        CONS = LinkedList.makeList(Keyword.makeKeyword("invokestatic"),
-                langClass, "cons", methodSignature(2));
+        CONS = LinkedList.makeList(MethodBuilder.INVOKESTATIC,
+                langClass, "cons", Lambda.makeMethodSignature(2));
     }
 
-    Compiler() {
+    static class CompilationFrame {
+        LinkedList ast; // holds the whole compilation expression
+        LinkedList current; // first value in current is the next item to compile
+
+        CompilationFrame(LinkedList ast) {
+            this(ast, ast, false);
+        }
+
+        CompilationFrame(LinkedList ast, LinkedList current, boolean isTail) {
+            this.current = current;
+            this.ast = ast;
+        }
+    }
+
+    private static int classNum = 0;
+    static String genClassName() {
+        classNum ++;
+        return "AnonClass" + classNum;
+    }
+
+    private Map<Symbol, LinkedList> functionMap;
+    private MethodBuilder methodBuilder;
+    private DynamicsManager metaClassLoader;
+
+    Compiler(Environment environment) {
+        metaClassLoader = new DynamicsManager();
+        // methodBuilder = new MethodBuilder(Symbol.makeSymbol("myFunction"), 0);
+        methodBuilder = null;
         functionMap = new HashMap<>();
 
         String langClass = "io/github/whetfire/lateral/Lang";
@@ -47,19 +71,20 @@ public class Compiler {
 
         insertFuncall(Symbol.makeSymbol("cons"), CONS);
         insertFuncall(Symbol.makeSymbol("car"),
-                LinkedList.makeList(Keyword.makeKeyword("invokestatic"), langClass, "car", methodSignature(1)));
+                LinkedList.makeList(MethodBuilder.INVOKESTATIC, langClass, "car", Lambda.makeMethodSignature(1)));
         insertFuncall(Symbol.makeSymbol("cdr"),
-                LinkedList.makeList(Keyword.makeKeyword("invokestatic"), langClass, "cdr", methodSignature(1)));
+                LinkedList.makeList(MethodBuilder.INVOKESTATIC, langClass, "cdr", Lambda.makeMethodSignature(1)));
         insertFuncall(Symbol.makeSymbol("class"),
-                LinkedList.makeList(Keyword.makeKeyword("invokestatic"), langClass, "class", methodSignature(1)));
+                LinkedList.makeList(MethodBuilder.INVOKESTATIC, langClass, "class", Lambda.makeMethodSignature(1)));
     }
 
-    void insertFuncall(Symbol name, Object ... values) {
+
+    void insertFuncall(Symbol name, Object... values) {
         functionMap.put(name, LinkedList.makeList(values));
     }
 
-    LinkedList resolveFuncall(Symbol name) {
-        var ret = functionMap.get(name);
+    private LinkedList resolveFuncall(Symbol name) {
+        LinkedList ret = functionMap.get(name);
         if(ret == null) {
             throw new RuntimeException("Couldn't resolve function " + name);
         } else {
@@ -67,234 +92,306 @@ public class Compiler {
         }
     }
 
-    public MethodBuilder compileQuote(Object ast) {
-        Deque<LinkedList> stack = new ArrayDeque<>();
-        stack.push(LinkedList.makeList(new LinkedList(ast, null), null));
-        while(!stack.isEmpty()) {
-            LinkedList pair = stack.pop();
-            LinkedList val = (LinkedList) pair.getValue();
-            if(val == null) {
+    public void compileQuote(Object ast) {
+        Deque<CompilationFrame> stack = new ArrayDeque<>();
+        // base frame is special; it doesn't have a base ast value
+        // this allows simple objects to be compiled with the same logic that handles lists
+        stack.push(new CompilationFrame(new LinkedList(ast, null)));
+        while (!stack.isEmpty()) {
+            CompilationFrame frame = stack.pop();
+            LinkedList expr = frame.current;
+
+            // done with the list on the current level
+            if (expr == null) {
                 // build a list from symbols on the stack
-                if(pair.getNext().getValue() != null) {
+                if (stack.isEmpty()) {
+                    // reached base frame; exit
+                    break;
+                } else {
                     methodBuilder.insertOpCode(Keyword.makeKeyword("aconst_null"));
-                    for (int i = 0; i < LinkedList.length((LinkedList) pair.getNext().getValue()); i++) {
+                    for (int i = 0; i < LinkedList.length(frame.ast); i++) {
                         methodBuilder.insertOpCode(CONS);
                     }
-                } else {
-                    break;
                 }
-            } else if (val.getValue() instanceof LinkedList) {
+                continue;
+            }
+
+            Object value = expr.getValue();
+            if (value instanceof LinkedList) {
+                // value is a list; recurse.
                 // push parent expression back onto the stack
-                stack.push(LinkedList.makeList(val.getNext(), pair.getNext().getValue()));
-                stack.push(LinkedList.makeList(val.getValue(), val.getValue()));
+                frame.current = expr.getNext();
+                stack.push(frame);
+                stack.push(new CompilationFrame((LinkedList) value));
             } else {
-                Object atom = val.getValue();
-                // construct symbol
-                if(atom instanceof Symbol) {
-                    methodBuilder.insertOpCode(Keyword.makeKeyword("ldc"), atom.toString());
+                // non-list objects
+                if (value == null) {
+                    // quoted empty list '()
+                    methodBuilder.insertOpCode(Keyword.makeKeyword("aconst_null"));
+                } else if (value instanceof Symbol) {
+                    methodBuilder.insertOpCode(MethodBuilder.LDC, value.toString());
                     methodBuilder.insertOpCode(MAKE_SYM);
-                } else if(atom instanceof Integer) {
-                    methodBuilder.insertOpCode(Keyword.makeKeyword("iconst"), atom);
+                } else if (value instanceof Integer) {
+                    methodBuilder.insertOpCode(MethodBuilder.ICONST, value);
                     methodBuilder.insertOpCode(PARSE_INT);
                 } else {
-                    throw new RuntimeException("Can't quote " + atom);
+                    throw new RuntimeException("Can't quote " + value);
                 }
-                pair.setValue(val.getNext());
-                stack.push(pair);
+                // update frame
+                frame.current = expr.getNext();
+                stack.push(frame);
             }
         }
-        return methodBuilder;
     }
 
-    public MethodBuilder compile(Object object, ArrayList<Symbol> locals) {
-        if(object instanceof Symbol) {
-            /*
-            Iterate backwards through the locals to find the innermost occurrence of a variable.
-            For example:
-            (let (x 5)
-              (let (x 3)
-                x))
-             => 3
-             In this example, the outer x binding will have local index 0 and the inner binding will have index 1.
-             It may be useful to think of the locals as a stack of bindings.
-             By searching backwards, we find the top most occurrence of the variable in the stack.
-             */
-            int index = -1;
-            for (int i = locals.size() - 1; i >= 0; i--) {
-                if (object.equals(locals.get(i))) {
-                    index = i;
-                    break;
+    Lambda isMacroCall(LinkedList expr) {
+        Object obj = expr.getValue();
+        if(obj instanceof Symbol) {
+            Object resource = metaClassLoader.getResource((Symbol) obj);
+            if(resource instanceof Lambda) {
+                Lambda lambda = (Lambda) resource;
+                if(lambda.isMacro()) {
+                    return lambda;
                 }
             }
-            // symbol exists in locals / environment
-            if (index >= 0) {
-                methodBuilder.insertOpCode(Keyword.makeKeyword("aload"), index);
-            } else if(Symbol.NIL_SYMBOL.equals(object)) {
-                methodBuilder.insertOpCode(Keyword.makeKeyword("aconst_null"));
-            } else if(Symbol.TRUE_SYMBOL.equals(object)) {
-                methodBuilder.insertOpCode(PUSH_TRUE);
+        }
+        return null;
+    }
+
+    Object macroExpand(Object expr) {
+        while(true) {
+            // macro calls must be linked lists
+            if(!(expr instanceof LinkedList)) {
+                return expr;
+            }
+
+            Lambda macro = isMacroCall((LinkedList) expr);
+            if (macro == null) {
+                // not a macro call
+                return expr;
             } else {
-                throw new RuntimeException("Can't find symbol in environment: " + object);
+                // loop because macros may evaluate to macros
+                expr = macro.invoke(((LinkedList)expr).getNext());
             }
-        } else if (object instanceof Integer) {
-            methodBuilder.insertOpCode(Keyword.makeKeyword("iconst"), object);
-            methodBuilder.insertOpCode(PARSE_INT);
-        } else if (object instanceof LinkedList) {
-            return compile((LinkedList) object, locals);
-        } else if (object instanceof String) {
-            methodBuilder.insertOpCode(Keyword.makeKeyword("ldc"), object);
-        } else if(object instanceof Keyword) {
-            methodBuilder.insertOpCode(Keyword.makeKeyword("ldc"), object.toString());
-            methodBuilder.insertOpCode(MAKE_SYM);
-        } else {
-            throw new RuntimeException("Can't convert to bytecode: " + object);
         }
-        return methodBuilder;
     }
 
-    public MethodBuilder compile(LinkedList ast, ArrayList<Symbol> locals) {
-        // saves a list of pointers to parents of the working node
-        Deque<LinkedList> stack = new ArrayDeque<>();
-        stack.push(LinkedList.makeList(new LinkedList(ast, null), null));
-        while(!stack.isEmpty()) {
-            LinkedList pair = stack.pop();
-            LinkedList val = (LinkedList) pair.getValue();
-            if(val == null) {
-                LinkedList prev = (LinkedList) pair.getNext().getValue();
-                if (prev == null){
-                    // reached base of the syntax tree
-                    break;
-                } else if(!(prev.getValue() instanceof Symbol)) {
-                    throw new SyntaxException(String.format("%s can't be used as a function", prev.getValue()));
+    public void compile(Object ast, ArrayList<Symbol> locals, boolean isTail) {
+        ast = macroExpand(ast);
+        if(ast instanceof LinkedList) {
+            LinkedList expr = (LinkedList) ast;
+            Object head = expr.getValue();
+            expr = expr.getNext();
+            // switch on head here for special forms:
+            // quote, and, or, if/cond, let, lambda, def, defmacro
+            if (QUOTE_SYM.equals(head)) {
+                // TODO: assert that quote only has 1 argument
+                compileQuote(expr.getValue());
+            } else if (IF_SYM.equals(head)) {
+                if (LinkedList.length(expr) != 3) {
+                    throw new SyntaxException("if expects 3 arguments in body: test, then, else.");
                 }
-                Symbol funcall = (Symbol)prev.getValue();
-                for(Object opcode : resolveFuncall(funcall)) {
-                    methodBuilder.insertOpCode(opcode);
-                }
-            } else if (val.getValue() instanceof LinkedList) {
-                // push parent expression back onto the stack
-                stack.push(LinkedList.makeList(val.getNext(), pair.getNext().getValue()));
-                LinkedList expr = (LinkedList) val.getValue();
-                Object head = expr.getValue();
-                expr = expr.getNext();
-                // switch on head here for special forms:
-                // quote, and, or, if/cond, let, lambda, def, defmacro
-                if (QUOTE_SYM.equals(head)) {
-                    // TODO: assert that quote only has 1 argument
-                    compileQuote(expr.getValue());
-                } else if (IF_SYM.equals(head)) {
-                    if(LinkedList.length(expr) != 3){
-                        throw new SyntaxException("if expects 3 arguments in body: test, then, else.");
-                    }
-                    // TODO: extend to if-else with arbitrary number of branches
-                    Assembler.JumpLabel elseLab = new Assembler.JumpLabel();
-                    Assembler.JumpLabel endLab = new Assembler.JumpLabel();
+                // TODO: extend to if-else with arbitrary number of branches
+                MethodBuilder.JumpLabel elseLab = new MethodBuilder.JumpLabel();
+                MethodBuilder.JumpLabel endLab = new MethodBuilder.JumpLabel();
 
-                    // TEST
-                    compile(LinkedList.first(expr), locals);
-                    methodBuilder.insertOpCode(Assembler.IFNULL, elseLab);
-                    // TRUE BRANCH
-                    compile(LinkedList.second(expr), locals);
-                    methodBuilder.insertOpCode(Assembler.GOTO, endLab);
-                    // ELSE BRANCH
-                    methodBuilder.insertOpCode(Assembler.LABEL, elseLab);
-                    compile(LinkedList.third(expr), locals);
-                    // END
-                    methodBuilder.insertOpCode(Assembler.LABEL, endLab);
-                } else if (OR_SYM.equals(head) || AND_SYM.equals(head)) {
-                    // or: return first true value
-                    // and : return first false value
-                    if (expr == null) {
-                        // empty expressions
-                        if (OR_SYM.equals(head))
-                            methodBuilder.insertOpCode(Keyword.makeKeyword("aconst_null"));
-                        else
-                            methodBuilder.insertOpCode(PUSH_TRUE);
-                    } else {
-                        Assembler.JumpLabel endLab = new Assembler.JumpLabel();
-                        while (expr.getNext() != null) {
-                            compile(expr.getValue(), locals);
-                            methodBuilder.insertOpCode(Keyword.makeKeyword("dup"));
-                            if (OR_SYM.equals(head))
-                                methodBuilder.insertOpCode(Assembler.IFNONNULL, endLab);
-                            // TRUE BRANCH
-                            else // AND
-                                methodBuilder.insertOpCode(Assembler.IFNULL, endLab);
-                            methodBuilder.insertOpCode(Keyword.makeKeyword("pop"));
-                            expr = expr.getNext();
-                        }
-                        // when result depends on last element
-                        compile(expr.getValue(), locals);
-                        methodBuilder.insertOpCode(endLab);
-                    }
-                } else if(LET_SYM.equals(head)) {
-                    // TODO: assert that let has 2 arguments
-                    LinkedList bindList = (LinkedList)LinkedList.first(expr);
-                    // TODO: assert correct number and type of vars / bindings
-                    int localCount = locals.size();
-                    // bind locals
-                    while(bindList != null) {
-                        int localIndex = -1;
-                        Symbol bindSym = (Symbol) bindList.getValue();
-                        // if symbol already exists in this let environment, rebind value
-                        for(int i = localCount; i < locals.size(); i ++){
-                            if(bindSym.equals(locals.get(i))) {
-                                localIndex = i;
-                                break;
-                            }
-                        }
-                        // otherwise, append symbol to local list
-                        if(localIndex < 0) {
-                            locals.add(bindSym);
-                            localIndex = locals.size() - 1;
-                        }
-                        compile(bindList.getNext().getValue(), locals);
-                        // methodBuilder.insertOpCode(new AStore((byte)localIndex));
-                        methodBuilder.insertOpCode(Keyword.makeKeyword("astore"), localIndex);
-                        bindList = bindList.getNext().getNext();
-                    }
-                    // create a frame indicating new local count
-                    // methodBuilder.insertOpCode(new LocalLabel(locals.size()));
-                    methodBuilder.insertOpCode(Assembler.LOCALLABEL, locals.size());
-                    Object body = LinkedList.second(expr);
-                    compile(body, locals);
-                    // pop locals after body completes
-                    locals.subList(localCount, locals.size()).clear();
-                    // methodBuilder.insertOpCode(new LocalLabel(localCount));
-                    methodBuilder.insertOpCode(Assembler.LOCALLABEL, localCount);
+                // TEST
+                compile(LinkedList.first(expr), locals, false);
+                methodBuilder.insertOpCode(MethodBuilder.IFNULL, elseLab);
+                // TRUE BRANCH
+                compile(LinkedList.second(expr), locals, isTail);
+                if(isTail) {
+                    methodBuilder.insertOpCode(MethodBuilder.ARETURN);
                 } else {
-                    // not a special form; recurse on inner list normally
-                    stack.push(LinkedList.makeList(((LinkedList) val.getValue()).getNext(), val.getValue()));
+                    methodBuilder.insertOpCode(MethodBuilder.GOTO, endLab);
                 }
+                // ELSE BRANCH
+                methodBuilder.insertOpCode(MethodBuilder.LABEL, elseLab);
+                compile(LinkedList.third(expr), locals, isTail);
+                // END
+                if(isTail) {
+                    methodBuilder.insertOpCode(MethodBuilder.ARETURN);
+                } else {
+                    methodBuilder.insertOpCode(MethodBuilder.LABEL, endLab);
+                }
+            } else if (OR_SYM.equals(head) || AND_SYM.equals(head)) {
+                // or: return first true value
+                // and : return first false value
+                if (expr == null) {
+                    // empty expressions
+                    if (OR_SYM.equals(head))
+                        methodBuilder.insertOpCode(Keyword.makeKeyword("aconst_null"));
+                    else
+                        methodBuilder.insertOpCode(PUSH_TRUE);
+                } else {
+                    MethodBuilder.JumpLabel endLab = new MethodBuilder.JumpLabel();
+                    while (expr.getNext() != null) {
+                        compile(expr.getValue(), locals, false);
+                        methodBuilder.insertOpCode(Keyword.makeKeyword("dup"));
+                        if (OR_SYM.equals(head))
+                            methodBuilder.insertOpCode(MethodBuilder.IFNONNULL, endLab);
+                            // TRUE BRANCH
+                        else // AND
+                            methodBuilder.insertOpCode(MethodBuilder.IFNULL, endLab);
+                        methodBuilder.insertOpCode(Keyword.makeKeyword("pop"));
+                        expr = expr.getNext();
+                    }
+                    // when result depends on last element
+                    compile(expr.getValue(), locals, false);
+                    methodBuilder.insertOpCode(MethodBuilder.LABEL, endLab);
+                    if(isTail) {
+                        methodBuilder.insertOpCode(MethodBuilder.ARETURN);
+                    }
+                }
+            } else if (LET_SYM.equals(head)) {
+                // TODO: assert that let has 2 arguments
+                LinkedList bindList = (LinkedList) LinkedList.first(expr);
+                // TODO: assert correct number and type of vars / bindings
+                int localCount = locals.size();
+                // bind locals
+                while (bindList != null) {
+                    int localIndex = -1;
+                    Symbol bindSym = (Symbol) bindList.getValue();
+                    // if symbol already exists in this let environment, rebind value
+                    for (int i = localCount; i < locals.size(); i++) {
+                        if (bindSym.equals(locals.get(i))) {
+                            localIndex = i;
+                            break;
+                        }
+                    }
+                    // otherwise, append symbol to local list
+                    if (localIndex < 0) {
+                        locals.add(bindSym);
+                        localIndex = locals.size() - 1;
+                    }
+                    compile(bindList.getNext().getValue(), locals, false);
+                    methodBuilder.insertOpCode(MethodBuilder.ASTORE, localIndex);
+                    bindList = bindList.getNext().getNext();
+                }
+                // create a frame indicating new local count
+                methodBuilder.insertOpCode(MethodBuilder.LOCALLABEL, locals.size());
+                Object body = LinkedList.second(expr);
+                compile(body, locals, isTail);
+                // pop locals after body completes
+                locals.subList(localCount, locals.size()).clear();
+                methodBuilder.insertOpCode(MethodBuilder.LOCALLABEL, localCount);
+            } else if(ASM_SYM.equals(head)) {
+                // literal bytecode assembly; inject its values directly
+                for(Object o : expr) {
+                    methodBuilder.insertOpCode(o);
+                }
+                // TODO: evaluate whether this is a good idea
+                // perhaps returning should be up to the user?
+                if(isTail)
+                    methodBuilder.insertOpCode(MethodBuilder.ARETURN);
             } else {
-                compile(val.getValue(), locals);
-                pair.setValue(val.getNext());
-                stack.push(pair);
+                // not a special form; recurse on inner list normally
+
+                // look up head
+                if(!(head instanceof Symbol)) {
+                    throw new SyntaxException(head + " can't be used as a function call");
+                }
+                LinkedList funcall = resolveFuncall((Symbol) head);
+                if(funcall == null) {
+                    throw new RuntimeException("function " + head + " couldn't be found");
+                }
+                // evaluate each sub expression
+                for (Object sub : expr) {
+                    compile(sub, locals, false);
+                }
+                // generate head calling code
+                for (Object op : funcall) {
+                    methodBuilder.insertOpCode(op);
+                }
+                if(isTail) {
+                    methodBuilder.insertOpCode(MethodBuilder.ARETURN);
+                }
+            }
+        } else {
+            if (ast instanceof Symbol) {
+                /*
+                Iterate backwards through the locals to find the innermost occurrence of a variable.
+                For example:
+                (let (x 5)
+                  (let (x 3)
+                    x))
+                 => 3
+                 In this example, the outer x binding will have local index 0 and the inner binding will have index 1.
+                 It may be useful to think of the locals as a stack of bindings.
+                 By searching backwards, we find the top most occurrence of the variable in the stack.
+                 */
+                int index = -1;
+                for (int i = locals.size() - 1; i >= 0; i--) {
+                    if (ast.equals(locals.get(i))) {
+                        index = i;
+                        break;
+                    }
+                }
+                // symbol exists in locals / environment
+                if (index >= 0) {
+                    methodBuilder.insertOpCode(MethodBuilder.ALOAD, index);
+                } else if (Symbol.NIL_SYMBOL.equals(ast)) {
+                    methodBuilder.insertOpCode(Keyword.makeKeyword("aconst_null"));
+                } else if (Symbol.TRUE_SYMBOL.equals(ast)) {
+                    methodBuilder.insertOpCode(PUSH_TRUE);
+                } else {
+                    throw new RuntimeException("Can't find symbol in environment: " + ast);
+                }
+            } else if (ast instanceof Integer) {
+                methodBuilder.insertOpCode(MethodBuilder.ICONST, ast);
+                methodBuilder.insertOpCode(PARSE_INT);
+            } else if (ast instanceof String) {
+                methodBuilder.insertOpCode(MethodBuilder.LDC, ast);
+            } else if (ast instanceof Keyword) {
+                methodBuilder.insertOpCode(MethodBuilder.LDC, ast.toString());
+                methodBuilder.insertOpCode(MAKE_SYM);
+            } else {
+                throw new RuntimeException("Can't convert to bytecode: " + ast);
+            }
+
+            if(isTail) {
+                methodBuilder.insertOpCode(MethodBuilder.ARETURN);
             }
         }
-        return methodBuilder;
     }
 
-    MethodBuilder compileMethod(MethodBuilder methodBuilder, Object ast) {
+    public Lambda compileMethod(Object ast) {
         if(!(ast instanceof LinkedList)) {
             throw new SyntaxException();
         }
 
         LinkedList fundef = (LinkedList) ast;
-        if(!DEFUN_SYM.equals(LinkedList.first(fundef))) {
+        boolean isMacro = false;
+        if(DEFMACRO_SYM.equals(fundef.getValue())) {
+            isMacro = true;
+        } else if(!DEFUN_SYM.equals(fundef.getValue())){
             throw new SyntaxException("expected function definition");
-        } else if(!(LinkedList.second(fundef) instanceof Symbol)) {
+        }
+
+        fundef = fundef.getNext();
+        Symbol funName;
+        if(fundef.getValue() instanceof Symbol) {
+            funName = (Symbol) fundef.getValue();
+        } else {
             throw new SyntaxException("name of function must be a Sybmol");
-        } else if(LinkedList.third(fundef) != null && !(LinkedList.third(fundef) instanceof LinkedList)) {
+        }
+
+        fundef = fundef.getNext();
+        LinkedList params;
+        if(fundef.getValue() == null || fundef.getValue() instanceof LinkedList) {
+            params = (LinkedList) fundef.getValue();
+        } else {
             throw new SyntaxException("parameter list of function must be a LinkedList");
         }
-        Symbol funame = (Symbol) LinkedList.second(fundef);
-        LinkedList params = (LinkedList) LinkedList.third(fundef);
-        Object body = LinkedList.fourth(fundef);
+        int paramCount = LinkedList.length(params);
 
-        this.methodBuilder = methodBuilder;
-        methodBuilder.setName(funame);
-        methodBuilder.setArgCount(LinkedList.length(params));
+        fundef = fundef.getNext();
+        if(fundef == null) {
+            throw new RuntimeException("function can't have an empty body");
+        }
+        Object body = fundef.getValue();
+
+        methodBuilder = new MethodBuilder(funName, paramCount);
 
         ArrayList<Symbol> locals = new ArrayList<>();
         while(params != null) {
@@ -302,84 +399,42 @@ public class Compiler {
             params = params.getNext();
         }
 
-        compile(body, locals);
-        methodBuilder.insertOpCode(Keyword.makeKeyword("areturn"));
-        return methodBuilder;
+        compile(body, locals, true);
+        Lambda method = metaClassLoader.putMethod(methodBuilder, isMacro);
+        // Lambda wrapper = new Lambda(m, isMacro);
+        functionMap.put(funName, LinkedList.makeList(method.makeInvoker()));
+        return method;
     }
 
-    MethodBuilder compileMacro(MethodBuilder methodBuilder, Object ast) {
-        return methodBuilder;
-    }
-
-    public void importFunction(Object object) {
-        if(object instanceof LinkedList) {
-            LinkedList expr = (LinkedList) object;
-            if(DEFUN_SYM.equals(expr.getValue()) || DEFMACRO_SYM.equals(expr.getValue())) {
-                Symbol name = (Symbol)LinkedList.second(expr);
-                int paramCount = LinkedList.length((LinkedList) LinkedList.third(expr));
-                //insertFuncall(name, new InvokeStatic("MyClass", name.toString(), methodSignature(paramCount),
-                        //1 - paramCount));
-                insertFuncall(name, LinkedList.makeList(Keyword.makeKeyword("invokestatic"),
-                        "MyClass", name.toString(), methodSignature(paramCount)));
+    public Object compileTopLevel(Object ast) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException {
+        if(ast instanceof LinkedList) {
+            LinkedList astList = (LinkedList) ast;
+            if (DEFUN_SYM.equals(astList.getValue()) || DEFMACRO_SYM.equals(astList.getValue())) {
+                return compileMethod(ast);
             }
         }
-    }
-
-    public static ClassBuilder compileFile(String path) throws FileNotFoundException {
-        ClassBuilder classBuilder = new ClassBuilder();
-        Compiler compiler = new Compiler();
-        LispReader reader = new FileLispReader(path);
-        ArrayList<Object> forms = new ArrayList<>();
-        {
-            Object form;
-            while ((form = reader.readForm()) != null) {
-                forms.add(form);
-            }
-        }
-        // TODO: syntax checking
-        // extract method names and signatures
-        for(Object form : forms) {
-            compiler.importFunction(form);
-        }
-
-        /*
-        // first compile macros
-        for(Object form : forms) {
-            compiler.compileMacro(classBuilder.makeMethodBuilder(), form);
-        }
-        */
-
-        // then compile functions
-        for(Object form : forms) {
-            compiler.compileMethod(classBuilder.makeMethodBuilder(), form);
-        }
-        return classBuilder;
-    }
-
-    public static String methodSignature(int count) {
-        // should be refactored to somewhere more convenient
-        // Also used by MethodBuilder
-        StringBuilder sb = new StringBuilder();
-        sb.append('(');
-        for(int i = 0; i < count; i ++) {
-            sb.append("Ljava/lang/Object;");
-        }
-        sb.append(")Ljava/lang/Object;");
-        return sb.toString();
+        methodBuilder = new MethodBuilder(Symbol.makeSymbol("main"), 0);
+        compile(ast, new ArrayList<>(), true);
+        ClassBuilder builder = new ClassBuilder(genClassName());
+        builder.addMethod(methodBuilder);
+        Class<?> clazz = metaClassLoader.defineTemporaryClass(builder.toBytes());
+        Method m = clazz.getMethod("main", (Class<?>[]) null);
+        return m.invoke(null);
     }
 
     public static void main(String[] args) throws FileNotFoundException {
-        ClassBuilder cgen = Compiler.compileFile("./src/lisp/test.lisp");
-        cgen.writeToFile("MyClass.class");
-        //*
-        try {
-            Class<?> clazz = new LClassLoader().defineClass(cgen.toBytes());
-            Method m = clazz.getMethod("main", (Class<?>[])null);
-            System.out.println(m);
-            System.out.println("=> " + m.invoke(null));
-        } catch (Exception e){
-            e.printStackTrace();
+        System.out.println("test: " + (Integer.class.equals(int.class)));
+        Environment environment = new Environment();
+        Compiler compiler = new Compiler(environment);
+        LispReader reader = new FileLispReader("./src/lisp/test.lisp");
+
+        Object form;
+        while ((form = reader.readForm()) != null) {
+            try {
+                System.out.println(compiler.compileTopLevel(form));
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
         }
-        //*/
     }
 }
