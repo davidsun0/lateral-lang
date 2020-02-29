@@ -89,7 +89,6 @@ public class LinkedList implements Iterable<Object>{
         return prev;
     }
 
-    @Override
     public String toString() {
         StringBuilder builder = new StringBuilder();
         builder.append('(');
@@ -97,6 +96,10 @@ public class LinkedList implements Iterable<Object>{
         while(list != null) {
             if(list.value == null) {
                 builder.append("nil");
+            } else if (list.value instanceof String) {
+                builder.append('\"');
+                builder.append(list.value);
+                builder.append('\"');
             } else {
                 builder.append(list.value.toString());
             }

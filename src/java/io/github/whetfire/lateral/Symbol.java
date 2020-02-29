@@ -1,8 +1,8 @@
 package io.github.whetfire.lateral;
 
 public final class Symbol {
-    public final static Symbol NIL_SYMBOL = makeSymbol("nil");
-    public final static Symbol TRUE_SYMBOL = makeSymbol("t");
+    public final static Symbol NULL_SYMBOL = makeSymbol("null");
+    public final static Symbol TRUE_SYMBOL = makeSymbol("true");
 
     private final String value;
 

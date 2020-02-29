@@ -17,32 +17,65 @@ public class MethodBuilder {
      */
     static HashMap<Keyword, Integer> simpleCodes;
     static Keyword LABEL = Keyword.makeKeyword("label");
-    static Keyword LOCALLABEL = Keyword.makeKeyword("label");
+    static Keyword LOCALLABEL = Keyword.makeKeyword("locallabel");
     static Keyword IFNULL = Keyword.makeKeyword("ifnull");
     static Keyword IFNONNULL = Keyword.makeKeyword("ifnonnull");
     static Keyword GOTO = Keyword.makeKeyword("goto");
 
     static Keyword LDC = Keyword.makeKeyword("ldc");
     static Keyword GETSTATIC = Keyword.makeKeyword("getstatic");
+
     static Keyword INVOKESTATIC = Keyword.makeKeyword("invokestatic");
+    static Keyword INVOKESPECIAL = Keyword.makeKeyword("invokespecial");
 
     static Keyword ALOAD = Keyword.makeKeyword("aload");
     static Keyword ASTORE = Keyword.makeKeyword("astore");
     static Keyword ARETURN = Keyword.makeKeyword("areturn");
 
     static Keyword ICONST = Keyword.makeKeyword("iconst");
+    static Keyword ACONST_NULL = Keyword.makeKeyword("aconst_null");
+
+    static Keyword NEW = Keyword.makeKeyword("new");
+    static Keyword CHECKCAST = Keyword.makeKeyword("checkcast");
 
     static {
         simpleCodes = new HashMap<>();
-        simpleCodes.put(Keyword.makeKeyword("aconst_null"), (1 << 8) | 0x01);
+        simpleCodes.put(ACONST_NULL, (1 << 8) | 0x01);
         // simpleCodes.put(Keyword.makeKeyword("ireturn"), (1 << 8) | 0xAC);
-        simpleCodes.put(Keyword.makeKeyword("areturn"), (-1 << 8) | 0xB0);
+        simpleCodes.put(ARETURN, (-1 << 8) | 0xB0);
         simpleCodes.put(Keyword.makeKeyword("pop"), (-1 << 8) | 0x57);
         simpleCodes.put(Keyword.makeKeyword("dup"), (1 << 8) | 0x59);
     }
 
     static void asmError(Object op) {
         throw new RuntimeException("Can't assemble " + op);
+    }
+
+    //TODO: find a better home for this method
+    static int countArguments(String internalName) {
+        int count = 0;
+        int idx = 1;
+        char c;
+        boolean inClass = false;
+        while(')' != (c = internalName.charAt(idx))) {
+            if(!inClass) {
+                switch (c) {
+                    case 'L':
+                        inClass = true;
+                    case 'I':
+                        // other cases here
+                        count ++;
+                        break;
+                    default:
+                        // error?
+                        break;
+                }
+            } else if(c == ';'){
+                inClass = false;
+            }
+            idx ++;
+        }
+        return count;
     }
 
     static class StackMapFrame {
@@ -158,7 +191,7 @@ public class MethodBuilder {
     }
 
     /**
-     * Compiles expressions of the form '(:opcode args ...) into JVM bytecode,
+     * Compiles expressions of the form (:opcode args ...) into JVM bytecode,
      * where :opcode is a Keyword containing the name of a JVM instruction and args
      * are the appropriate arguments to the opcode.
      * Simple op codes that do not need arguments are handled automatically by assembleCode.
@@ -176,14 +209,15 @@ public class MethodBuilder {
             stackMapTable.add(new StackMapFrame(stackHeight, localCount, bytecount));
             target.byteCodePosition = bytecount;
         } else if(LOCALLABEL.equals(kop)) {
-            asmError(kop);
-            //TODO
-            // set locals
-            // byteops.add(op);
+            localCount = (Integer)LinkedList.second(compOp);
+            stackMapTable.add(new StackMapFrame(stackHeight, localCount, bytecount));
+            // asmError(kop);
         } else if(GOTO.equals(kop) || IFNONNULL.equals(kop) || IFNULL.equals(kop)) {
+            // defer assembling jumps to second pass
             byteops.add(compOp);
             bytecount += 3;
             if(!GOTO.equals(kop)) {
+                // conditional jumps pop off argument
                 stackHeight --;
             }
             // set stack height at jump target
@@ -192,14 +226,31 @@ public class MethodBuilder {
         } else if(ALOAD.equals(kop)) {
             int idx = (Integer) LinkedList.second(compOp);
             if (idx < 4) {
+                // specific codes for aload_0 to aload_4
                 byteops.add((byte) (0x2A + idx));
-                bytecount += 1;
+                bytecount ++;
             } else {
+                // general aload
                 byteops.add((byte) 0x19);
                 byteops.add((byte) idx);
                 bytecount += 2;
             }
             stackHeight++;
+        } else if(ASTORE.equals(kop)) {
+            // all astore opcodes are exactly 0x21 more than aload
+            // but it's probably better to leave them separate for readability
+            int idx = (Integer) LinkedList.second(compOp);
+            if(idx < 4) {
+                // specific codes for astore_0 to astore_4
+                byteops.add((byte) (0x4B + idx));
+                bytecount ++;
+            } else {
+                // general astore
+                byteops.add((byte) 0x3A);
+                byteops.add((byte) idx);
+                bytecount += 2;
+            }
+            stackHeight --;
         } else if(LDC.equals(kop)) {
             Object robj = LinkedList.second(compOp);
             ConstantEntry resource = null;
@@ -224,40 +275,82 @@ public class MethodBuilder {
             }
             stackHeight ++;
         } else if(GETSTATIC.equals(kop)) {
+            byteops.add((byte) 0xB2);
             ConstantPool.FieldRefInfo fieldRefInfo = new ConstantPool.FieldRefInfo(
                     (String) LinkedList.second(compOp),
                     (String) LinkedList.third(compOp),
                     (String) LinkedList.fourth(compOp)
             );
             short x = builder.pool.put(fieldRefInfo);
-            byteops.add((byte) 0xB2);
             byteops.add((byte) ((x >> 8) & 0xFF));
             byteops.add((byte) (x & 0xFF));
             bytecount += 3;
             stackHeight++;
         } else if(INVOKESTATIC.equals(kop)) {
+            byteops.add((byte) 0xB8);
+            String methodType = (String) LinkedList.fourth(compOp);
             ConstantPool.MethodRefInfo methodRefInfo = new ConstantPool.MethodRefInfo(
                     (String) LinkedList.second(compOp),
                     (String) LinkedList.third(compOp),
-                    (String) LinkedList.fourth(compOp)
+                    methodType
             );
             short x = builder.pool.put(methodRefInfo);
-            byteops.add((byte) 0xB8);
             byteops.add((byte) ((x >> 8) & 0xFF));
             byteops.add((byte) (x & 0xFF));
             bytecount += 3;
             // stackHeight++;
-            // TODO: generate stack height
+            // TODO: generate stack height in a better way
+            // to find the new stack height, subtract number of arguments
+            stackHeight -= countArguments(methodType);
+            // add the returned object to the stack (if it isn't void)
+            if (methodType.charAt(methodType.length() - 1) != 'V')
+                stackHeight++;
+        } else if(INVOKESPECIAL.equals(kop)) {
+            // same as invokestatic
+            byteops.add((byte) 0xB7);
+            String methodType = (String) LinkedList.fourth(compOp);
+            ConstantPool.MethodRefInfo methodRefInfo = new ConstantPool.MethodRefInfo(
+                    (String) LinkedList.second(compOp),
+                    (String) LinkedList.third(compOp),
+                    methodType
+            );
+            short x = builder.pool.put(methodRefInfo);
+            byteops.add((byte) ((x >> 8) & 0xFF));
+            byteops.add((byte) (x & 0xFF));
+            bytecount += 3;
+            // stackHeight++;
+            // TODO: generate stack height in a better way
+            // to find the new stack height, subtract number of arguments
+            stackHeight -= countArguments(methodType);
+            // add the returned object to the stack (if it isn't void)
+            if (methodType.charAt(methodType.length() - 1) != 'V')
+                stackHeight++;
         } else if(ICONST.equals(kop)) {
             Integer value = (Integer) LinkedList.second(compOp);
-            if(-1 <= value && value <= 5) {
-                byteops.add((byte)(value + 0x3));
-                bytecount ++;
+            if (-1 <= value && value <= 5) {
+                byteops.add((byte) (value + 0x3));
+                bytecount++;
             } else {
                 // TODO: fall back to ldc
                 asmError(kop);
             }
-            stackHeight ++;
+            stackHeight++;
+        } else if(NEW.equals(kop)) {
+            byteops.add((byte) 0xBB);
+            ConstantPool.ClassInfo classInfo = new ConstantPool.ClassInfo((String) LinkedList.second(compOp));
+            short x = builder.pool.put(classInfo);
+            byteops.add((byte) ((x >> 8) & 0xFF));
+            byteops.add((byte) (x & 0xFF));
+            bytecount += 3;
+            stackHeight++;
+        } else if(CHECKCAST.equals(kop)) {
+            byteops.add((byte) 0xC0);
+            ConstantPool.ClassInfo classInfo = new ConstantPool.ClassInfo((String) LinkedList.second(compOp));
+            short x = builder.pool.put(classInfo);
+            byteops.add((byte) ((x >> 8) & 0xFF));
+            byteops.add((byte) (x & 0xFF));
+            bytecount += 3;
+            // stack height stays the same, checkcast only changes the type of the top object
         } else {
             asmError(kop);
         }
@@ -292,6 +385,8 @@ public class MethodBuilder {
 
             if(stackHeight > maxStack)
                 maxStack = stackHeight;
+            if(localCount > maxLocals)
+                maxLocals = localCount;
         }
 
         // System.out.println("bytes =====");

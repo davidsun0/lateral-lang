@@ -19,15 +19,22 @@ public class Compiler {
             "io/github/whetfire/lateral/Symbol", "makeSymbol",
             "(Ljava/lang/String;)Lio/github/whetfire/lateral/Symbol;"
     );
+    static LinkedList MAKE_KEY = LinkedList.makeList(
+            Keyword.makeKeyword("invokestatic"),
+            "io/github/whetfire/lateral/Keyword", "makeKeyword",
+            "(Ljava/lang/String;)Lio/github/whetfire/lateral/Keyword;"
+    );
     static LinkedList CONS;
     static Symbol QUOTE_SYM = Symbol.makeSymbol("quote");
     static Symbol IF_SYM = Symbol.makeSymbol("if");
     static Symbol AND_SYM = Symbol.makeSymbol("and");
     static Symbol OR_SYM = Symbol.makeSymbol("or");
+    static Symbol DEF_SYM = Symbol.makeSymbol("def");
     static Symbol DEFUN_SYM = Symbol.makeSymbol("defun");
     static Symbol DEFMACRO_SYM = Symbol.makeSymbol("defmacro");
     static Symbol LET_SYM = Symbol.makeSymbol("let");
     static Symbol ASM_SYM = Symbol.makeSymbol("asm");
+    static Symbol LIST_ASM = Symbol.makeSymbol("list");
 
     static {
         String langClass = "io/github/whetfire/lateral/Lang";
@@ -187,6 +194,15 @@ public class Compiler {
             if (QUOTE_SYM.equals(head)) {
                 // TODO: assert that quote only has 1 argument
                 compileQuote(expr.getValue());
+            } else if(DEF_SYM.equals(head)) {
+                // insert into environment
+                // macro expand name?
+                Symbol name = (Symbol)expr.getValue();
+                compileQuote(name);
+                compile(LinkedList.second(expr), locals, false);
+                // somehow insert into environment
+                // return value
+                throw new RuntimeException();
             } else if (IF_SYM.equals(head)) {
                 if (LinkedList.length(expr) != 3) {
                     throw new SyntaxException("if expects 3 arguments in body: test, then, else.");
@@ -220,7 +236,7 @@ public class Compiler {
                 if (expr == null) {
                     // empty expressions
                     if (OR_SYM.equals(head))
-                        methodBuilder.insertOpCode(Keyword.makeKeyword("aconst_null"));
+                        methodBuilder.insertOpCode(MethodBuilder.ACONST_NULL);
                     else
                         methodBuilder.insertOpCode(PUSH_TRUE);
                 } else {
@@ -274,14 +290,50 @@ public class Compiler {
                 compile(body, locals, isTail);
                 // pop locals after body completes
                 locals.subList(localCount, locals.size()).clear();
-                methodBuilder.insertOpCode(MethodBuilder.LOCALLABEL, localCount);
+                // not necessary to remove locals? doesn't compile sometimes with let
+                // shouldn't be a problem as locals ArrayList is modified
+                // methodBuilder.insertOpCode(MethodBuilder.LOCALLABEL, localCount);
             } else if(ASM_SYM.equals(head)) {
                 // literal bytecode assembly; inject its values directly
-                for(Object o : expr) {
-                    methodBuilder.insertOpCode(o);
+                for (Object o : expr) {
+                    if(o instanceof Symbol) {
+                        /*
+                        way for asm to insert variables
+                        not sure if this is a good idea
+                         */
+                        Symbol symbol = (Symbol) o;
+                        int index = -1;
+                        for (int i = locals.size() - 1; i >= 0; i--) {
+                            if (symbol.equals(locals.get(i))) {
+                                index = i;
+                                break;
+                            }
+                        }
+                        if (index >= 0) {
+                            methodBuilder.insertOpCode(MethodBuilder.ALOAD, index);
+                        } else {
+                            System.out.println(o);
+                            throw new SyntaxException();
+                        }
+                    } else {
+                        // asm command
+                        methodBuilder.insertOpCode(o);
+                    }
                 }
                 // TODO: evaluate whether this is a good idea
                 // perhaps returning should be up to the user?
+                if (isTail)
+                    methodBuilder.insertOpCode(MethodBuilder.ARETURN);
+            } else if(LIST_ASM.equals(head)) {
+                // TODO: out from compiler once varargs are written
+                int length = LinkedList.length(expr);
+                for(Object o : expr) {
+                    compile(o, locals, false);
+                }
+                methodBuilder.insertOpCode(MethodBuilder.ACONST_NULL);
+                for(int i = 0; i < length; i ++) {
+                    methodBuilder.insertOpCode(CONS);
+                }
                 if(isTail)
                     methodBuilder.insertOpCode(MethodBuilder.ARETURN);
             } else {
@@ -330,8 +382,8 @@ public class Compiler {
                 // symbol exists in locals / environment
                 if (index >= 0) {
                     methodBuilder.insertOpCode(MethodBuilder.ALOAD, index);
-                } else if (Symbol.NIL_SYMBOL.equals(ast)) {
-                    methodBuilder.insertOpCode(Keyword.makeKeyword("aconst_null"));
+                } else if (Symbol.NULL_SYMBOL.equals(ast)) {
+                    methodBuilder.insertOpCode(MethodBuilder.ACONST_NULL);
                 } else if (Symbol.TRUE_SYMBOL.equals(ast)) {
                     methodBuilder.insertOpCode(PUSH_TRUE);
                 } else {
@@ -343,8 +395,8 @@ public class Compiler {
             } else if (ast instanceof String) {
                 methodBuilder.insertOpCode(MethodBuilder.LDC, ast);
             } else if (ast instanceof Keyword) {
-                methodBuilder.insertOpCode(MethodBuilder.LDC, ast.toString());
-                methodBuilder.insertOpCode(MAKE_SYM);
+                methodBuilder.insertOpCode(MethodBuilder.LDC, ((Keyword) ast).getValue());
+                methodBuilder.insertOpCode(MAKE_KEY);
             } else {
                 throw new RuntimeException("Can't convert to bytecode: " + ast);
             }
@@ -415,15 +467,22 @@ public class Compiler {
         }
         methodBuilder = new MethodBuilder(Symbol.makeSymbol("main"), 0);
         compile(ast, new ArrayList<>(), true);
+        // methodBuilder.printCodes();
         ClassBuilder builder = new ClassBuilder(genClassName());
         builder.addMethod(methodBuilder);
         Class<?> clazz = metaClassLoader.defineTemporaryClass(builder.toBytes());
-        Method m = clazz.getMethod("main", (Class<?>[]) null);
-        return m.invoke(null);
+        try {
+            Method m = clazz.getMethod("main", (Class<?>[]) null);
+            return m.invoke(null);
+        } catch (Exception | Error e) {
+            methodBuilder.printCodes();
+            builder.writeToFile("MyClass.class");
+            e.printStackTrace();
+            return null;
+        }
     }
 
     public static void main(String[] args) throws FileNotFoundException {
-        System.out.println("test: " + (Integer.class.equals(int.class)));
         Environment environment = new Environment();
         Compiler compiler = new Compiler(environment);
         LispReader reader = new FileLispReader("./src/lisp/test.lisp");
@@ -434,6 +493,7 @@ public class Compiler {
                 System.out.println(compiler.compileTopLevel(form));
             } catch (Exception e) {
                 e.printStackTrace();
+                return;
             }
         }
     }

@@ -11,6 +11,10 @@ public final class Keyword {
         return new Keyword(name);
     }
 
+    public String getValue() {
+        return name;
+    }
+
     public int hashCode() {
         return name.hashCode();
     }
