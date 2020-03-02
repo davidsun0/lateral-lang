@@ -51,6 +51,15 @@ public class LinkedList implements Iterable<Object>{
         return first(next(next(next(list))));
     }
 
+    public static Object nth(LinkedList list, int n) {
+        for(int i = 0; i < n; i ++) {
+            if(list == null)
+                return null;
+            list = list.getNext();
+        }
+        return list.getValue();
+    }
+
     public static LinkedList prepend(Object value, LinkedList head) {
         return new LinkedList(value, head);
     }

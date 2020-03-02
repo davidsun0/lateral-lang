@@ -1,8 +1,9 @@
 package io.github.whetfire.lateral;
 
+import java.lang.ref.ReferenceQueue;
+import java.lang.ref.WeakReference;
 import java.lang.reflect.Method;
 import java.util.HashMap;
-import java.util.Map;
 
 /**
  * DynamicsManager handles all dynamically generated classes and methods.
@@ -12,42 +13,64 @@ import java.util.Map;
  */
 class DynamicsManager {
 
-    private Map<String, ClassDefiner> classDefinerMap = new HashMap<>();
-    private Map<Symbol, Object> resourceMap = new HashMap<>();
+    private HashMap<String, WeakReference<Class<?>>> classMap;
+    private ReferenceQueue<Class<?>> referenceQueue;
+
+    DynamicsManager() {
+        this.classMap = new HashMap<>();
+        this.referenceQueue = new ReferenceQueue<>();
+    }
+
+    private void putClass(Class clazz) {
+        if (referenceQueue.poll() != null) {
+            classMap.entrySet().removeIf((entry) -> {
+                System.err.println("class " + entry.getKey() + " was garbage collected");
+                return entry.getValue().get() == null;
+            });
+        }
+        classMap.put(clazz.getName(), new WeakReference<Class<?>>(clazz, referenceQueue));
+    }
+
+    /**
+     * Takes a ClassBuilder and inserts the class it represents into the runtime environment.
+     *
+     * @param classBuilder This ClassBuilder is resolved and converted to bytes and loaded into the JVM.
+     * @return The class represented by the ClassBuilder
+     * @throws VerifyError if the ClassBuilder contains a malformed class
+     */
+    public Class<?> putClass(ClassBuilder classBuilder) throws VerifyError {
+        Class<?> clazz = new ClassDefiner(classBuilder.toBytes()).clazz;
+        putClass(clazz);
+        return clazz;
+    }
 
     /**
      * Takes a MethodBuilder and inserts the method it represents into the runtime environment.
+     * The method is inserted into an anonymous class and the class is resolved.
      *
      * @param methodBuilder The builder to be used to generate a binary method
-     * @param isMacro If the method represents a Lisp macro - If true, it will be run at compile time
      * @return A Lambda object wrapping the java.lang.reflect.Method
+     * @throws VerifyError if the MethodBuilder represents a malformed method
      */
-    public Lambda putMethod(MethodBuilder methodBuilder, boolean isMacro) {
+    public Method putMethod(MethodBuilder methodBuilder) throws VerifyError {
         // If the Class / ClassLoader overhead is too much, try lazily producing classes:
         // Keep a list of queued methods and only compile into a class when needed
-        // Cons: harder to revoke methods when overwritten?
-        ClassBuilder classBuilder = new ClassBuilder(Compiler.genClassName());
+        // disadvantages:
+        // harder to revoke methods when overwritten (?)
+        // may be harder to debug cause of bad method
+        String className = Compiler.genClassName();
+        ClassBuilder classBuilder = new ClassBuilder(className);
         classBuilder.addMethod(methodBuilder);
-        // System.out.println(methodBuilder.getName());
-        Class<?> clazz = defineClass(classBuilder.toBytes());
+        Class<?> clazz = new ClassDefiner(classBuilder.toBytes()).clazz;
         try {
-            Method method = clazz.getMethod(methodBuilder.getName().toString(), methodBuilder.getParameterTypes());
-            Lambda wrapper = new Lambda(method, isMacro);
-            resourceMap.put(methodBuilder.getName(), wrapper);
-            return wrapper;
+            Method method = clazz.getMethod(methodBuilder.getName().getValue(), methodBuilder.getParameterTypes());
+            putClass(clazz);
+            return method;
         } catch (NoSuchMethodException nsme) {
             // something has gone seriously wrong
             // we just made this class and put the method inside
             throw new RuntimeException("compiler broken?", nsme);
-        } catch (VerifyError ve) {
-            // Bug in the compiler - the class is malformed
-            methodBuilder.printCodes();
-            throw new SyntaxException(ve);
         }
-    }
-
-    public Object getResource(Symbol symbol) {
-        return resourceMap.get(symbol);
     }
 
     /**
@@ -58,45 +81,30 @@ class DynamicsManager {
      * @return The class defined in classBytes
      */
     public Class<?> defineTemporaryClass(byte[] classBytes) {
-        return new ClassDefiner().defineClass(classBytes);
-    }
-
-    private Class<?> defineClass(byte[] classBytes) {
-        ClassDefiner classDefiner = new ClassDefiner();
-        Class clazz = classDefiner.defineClass(classBytes);
-        classDefinerMap.put(clazz.getName(), classDefiner);
-        return clazz;
+        return new ClassDefiner(classBytes).clazz;
     }
 
     private Class<?> findClass(String name) throws ClassNotFoundException {
-        ClassDefiner classDefiner = classDefinerMap.get(name);
-        if(classDefiner == null)
-            throw new ClassNotFoundException();
-        Class clazz = classDefiner.findClass(name);
-        if(clazz == null) {
+        WeakReference<Class<?>> reference = classMap.get(name);
+        if(reference == null || reference.get() == null) {
             throw new ClassNotFoundException();
         }
-        return clazz;
+        return reference.get();
     }
 
     /**
-     * ClassDefiner provides a hook to define new Java classes at runtime.
-     * ClassLoader.defineClass is used to inject the class.
-     *
+     * Provides a hook to define a new JVM classes at runtime.
      */
     class ClassDefiner extends ClassLoader {
+        private Class<?> clazz;
 
-        private Map<String, Class> classMap = new HashMap<>();
-
-        /**
+        /*
          * Loads a new class into the JVM at runtime.
          * @param classBytes byte array representing the contents of a JVM class file
          * @return Class defined in classBytes after loading it into the JVM
          */
-        public Class<?> defineClass(byte[] classBytes) {
-            Class clazz = super.defineClass(null, classBytes, 0, classBytes.length);
-            classMap.put(clazz.getName(), clazz);
-            return clazz;
+        ClassDefiner(byte[] classBytes) {
+            clazz = super.defineClass(null, classBytes, 0, classBytes.length);
         }
 
         /**
@@ -104,20 +112,19 @@ class DynamicsManager {
          *
          * Every class asks its own ClassLoader to resolve references to other classes.
          * Since this instance may not have loaded the other class, we defer to the parent
-         * DynamicsManager. Then the DynamicsManager attempts to find the class or throws
-         * a ClassNotFoundException when appropriate.
+         * DynamicsManager.
          *
          * @param name Name of the class to be found
          * @return The Class object of the class with the given name
-         * @throws ClassNotFoundException If the class was not loaded by this ClassDefiner
+         * @throws ClassNotFoundException If neither this ClassDefiner or the parent DynamicsManager
+         * could find the class
          * or any of the ClassDefiners in the parent DynamicsManager
          */
         protected Class<?> findClass(String name) throws ClassNotFoundException {
-            Class<?> clazz = classMap.get(name);
-            if(clazz == null)
-                return DynamicsManager.this.findClass(name);
-            else
+            if(name.equals(clazz.getName()))
                 return clazz;
+            else
+                return DynamicsManager.this.findClass(name);
         }
     }
 }

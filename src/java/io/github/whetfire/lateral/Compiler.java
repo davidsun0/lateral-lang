@@ -3,6 +3,7 @@ package io.github.whetfire.lateral;
 import java.io.FileNotFoundException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.security.Key;
 import java.util.*;
 
 public class Compiler {
@@ -24,6 +25,13 @@ public class Compiler {
             "io/github/whetfire/lateral/Keyword", "makeKeyword",
             "(Ljava/lang/String;)Lio/github/whetfire/lateral/Keyword;"
     );
+
+    static LinkedList ENVIR_LOOKUP = LinkedList.makeList(
+            Keyword.makeKeyword("invokestatic"),
+            "io/github/whetfire/lateral/Environment", "get",
+            "(Lio/github/whetfire/lateral/Symbol;)Ljava/lang/Object;"
+    );
+
     static LinkedList CONS;
     static Symbol QUOTE_SYM = Symbol.makeSymbol("quote");
     static Symbol IF_SYM = Symbol.makeSymbol("if");
@@ -37,10 +45,8 @@ public class Compiler {
     static Symbol LIST_ASM = Symbol.makeSymbol("list");
 
     static {
-        String langClass = "io/github/whetfire/lateral/Lang";
-        String objClass = "java/lang/Object";
         CONS = LinkedList.makeList(MethodBuilder.INVOKESTATIC,
-                langClass, "cons", Lambda.makeMethodSignature(2));
+                "io/github/whetfire/lateral/Lang", "cons", Lambda.makeMethodSignature(2));
     }
 
     static class CompilationFrame {
@@ -63,41 +69,12 @@ public class Compiler {
         return "AnonClass" + classNum;
     }
 
-    private Map<Symbol, LinkedList> functionMap;
     private MethodBuilder methodBuilder;
-    private DynamicsManager metaClassLoader;
 
-    Compiler(Environment environment) {
-        metaClassLoader = new DynamicsManager();
-        // methodBuilder = new MethodBuilder(Symbol.makeSymbol("myFunction"), 0);
+    Compiler() {
         methodBuilder = null;
-        functionMap = new HashMap<>();
-
-        String langClass = "io/github/whetfire/lateral/Lang";
-        String objClass = "java/lang/Object";
-
-        insertFuncall(Symbol.makeSymbol("cons"), CONS);
-        insertFuncall(Symbol.makeSymbol("car"),
-                LinkedList.makeList(MethodBuilder.INVOKESTATIC, langClass, "car", Lambda.makeMethodSignature(1)));
-        insertFuncall(Symbol.makeSymbol("cdr"),
-                LinkedList.makeList(MethodBuilder.INVOKESTATIC, langClass, "cdr", Lambda.makeMethodSignature(1)));
-        insertFuncall(Symbol.makeSymbol("class"),
-                LinkedList.makeList(MethodBuilder.INVOKESTATIC, langClass, "class", Lambda.makeMethodSignature(1)));
     }
 
-
-    void insertFuncall(Symbol name, Object... values) {
-        functionMap.put(name, LinkedList.makeList(values));
-    }
-
-    private LinkedList resolveFuncall(Symbol name) {
-        LinkedList ret = functionMap.get(name);
-        if(ret == null) {
-            throw new RuntimeException("Couldn't resolve function " + name);
-        } else {
-            return ret;
-        }
-    }
 
     public void compileQuote(Object ast) {
         Deque<CompilationFrame> stack = new ArrayDeque<>();
@@ -136,7 +113,7 @@ public class Compiler {
                     // quoted empty list '()
                     methodBuilder.insertOpCode(Keyword.makeKeyword("aconst_null"));
                 } else if (value instanceof Symbol) {
-                    methodBuilder.insertOpCode(MethodBuilder.LDC, value.toString());
+                    methodBuilder.insertOpCode(MethodBuilder.LDC, ((Symbol) value).getValue());
                     methodBuilder.insertOpCode(MAKE_SYM);
                 } else if (value instanceof Integer) {
                     methodBuilder.insertOpCode(MethodBuilder.ICONST, value);
@@ -154,7 +131,7 @@ public class Compiler {
     Lambda isMacroCall(LinkedList expr) {
         Object obj = expr.getValue();
         if(obj instanceof Symbol) {
-            Object resource = metaClassLoader.getResource((Symbol) obj);
+            Object resource = Environment.getIfExists((Symbol) obj);
             if(resource instanceof Lambda) {
                 Lambda lambda = (Lambda) resource;
                 if(lambda.isMacro()) {
@@ -343,18 +320,31 @@ public class Compiler {
                 if(!(head instanceof Symbol)) {
                     throw new SyntaxException(head + " can't be used as a function call");
                 }
-                LinkedList funcall = resolveFuncall((Symbol) head);
-                if(funcall == null) {
-                    throw new RuntimeException("function " + head + " couldn't be found");
+                Object funObj = Environment.get((Symbol) head);
+                Lambda funcall;
+                if(funObj instanceof Lambda) {
+                    funcall = (Lambda) funObj;
+                } else {
+                    throw new RuntimeException(head + " can't be used as a function call");
                 }
                 // evaluate each sub expression
                 for (Object sub : expr) {
                     compile(sub, locals, false);
                 }
+
+                if(funcall.isVarargs) {
+                    methodBuilder.insertOpCode(MethodBuilder.ACONST_NULL);
+                    for(int i = funcall.argCount; i < LinkedList.length(expr) + 1; i ++) {
+                        methodBuilder.insertOpCode(CONS);
+                    }
+                }
                 // generate head calling code
+                methodBuilder.insertOpCode(funcall.invoker);
+                /*
                 for (Object op : funcall) {
                     methodBuilder.insertOpCode(op);
                 }
+                */
                 if(isTail) {
                     methodBuilder.insertOpCode(MethodBuilder.ARETURN);
                 }
@@ -387,7 +377,10 @@ public class Compiler {
                 } else if (Symbol.TRUE_SYMBOL.equals(ast)) {
                     methodBuilder.insertOpCode(PUSH_TRUE);
                 } else {
-                    throw new RuntimeException("Can't find symbol in environment: " + ast);
+                    // have the class look up the symbol in the environment
+                    methodBuilder.insertOpCode(MethodBuilder.LDC, ((Symbol)ast).getValue());
+                    methodBuilder.insertOpCode(MAKE_SYM);
+                    methodBuilder.insertOpCode(ENVIR_LOOKUP);
                 }
             } else if (ast instanceof Integer) {
                 methodBuilder.insertOpCode(MethodBuilder.ICONST, ast);
@@ -436,14 +429,25 @@ public class Compiler {
             throw new SyntaxException("parameter list of function must be a LinkedList");
         }
         int paramCount = LinkedList.length(params);
+        boolean isVarargs = false;
+        if(paramCount > 2 && Keyword.makeKeyword("rest").equals(LinkedList.nth(params, paramCount - 2))) {
+            paramCount --;
+            isVarargs = true;
+            Object[] newParams = new Object[paramCount];
+            for(int i = 0; i < paramCount; i ++) {
+                newParams[i] = params.getValue();
+                params = params.getNext();
+            }
+            newParams[paramCount - 1] = params.getValue();
+            params = LinkedList.makeList(newParams);
+        }
+        methodBuilder = new MethodBuilder(funName, paramCount, isMacro, isVarargs);
 
         fundef = fundef.getNext();
         if(fundef == null) {
             throw new RuntimeException("function can't have an empty body");
         }
         Object body = fundef.getValue();
-
-        methodBuilder = new MethodBuilder(funName, paramCount);
 
         ArrayList<Symbol> locals = new ArrayList<>();
         while(params != null) {
@@ -452,13 +456,10 @@ public class Compiler {
         }
 
         compile(body, locals, true);
-        Lambda method = metaClassLoader.putMethod(methodBuilder, isMacro);
-        // Lambda wrapper = new Lambda(m, isMacro);
-        functionMap.put(funName, LinkedList.makeList(method.makeInvoker()));
-        return method;
+        return Environment.insertMethod(funName, methodBuilder);
     }
 
-    public Object compileTopLevel(Object ast) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException {
+    public Object compileTopLevel(Object ast) throws VerifyError, InvocationTargetException {
         if(ast instanceof LinkedList) {
             LinkedList astList = (LinkedList) ast;
             if (DEFUN_SYM.equals(astList.getValue()) || DEFMACRO_SYM.equals(astList.getValue())) {
@@ -467,24 +468,21 @@ public class Compiler {
         }
         methodBuilder = new MethodBuilder(Symbol.makeSymbol("main"), 0);
         compile(ast, new ArrayList<>(), true);
-        // methodBuilder.printCodes();
         ClassBuilder builder = new ClassBuilder(genClassName());
         builder.addMethod(methodBuilder);
-        Class<?> clazz = metaClassLoader.defineTemporaryClass(builder.toBytes());
+        Class<?> clazz = Environment.defineTemporaryClass(builder);
         try {
             Method m = clazz.getMethod("main", (Class<?>[]) null);
             return m.invoke(null);
-        } catch (Exception | Error e) {
+        } catch (NoSuchMethodException | IllegalAccessException e) {
             methodBuilder.printCodes();
-            builder.writeToFile("MyClass.class");
             e.printStackTrace();
             return null;
         }
     }
 
     public static void main(String[] args) throws FileNotFoundException {
-        Environment environment = new Environment();
-        Compiler compiler = new Compiler(environment);
+        Compiler compiler = new Compiler();
         LispReader reader = new FileLispReader("./src/lisp/test.lisp");
 
         Object form;

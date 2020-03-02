@@ -5,7 +5,10 @@ import java.lang.reflect.Method;
 
 public class Lambda {
     private Method method;
-    private boolean isMacro;
+    final boolean isMacro, isVarargs;
+    final int argCount;
+    LinkedList invoker;
+
 
     /**
      * Creates a String with the JVM internal representation of a method
@@ -37,18 +40,25 @@ public class Lambda {
         return sb.toString();
     }
 
-    Lambda(Method method, boolean isMacro) {
+    Lambda(Method method) {
         this.method = method;
-        this.isMacro = isMacro;
+        isMacro = method.isAnnotationPresent(Macro.class);
+        isVarargs = method.isAnnotationPresent(Varargs.class);
+        argCount = method.getParameterCount();
+        invoker = makeInvoker();
     }
 
-    LinkedList makeInvoker() {
+    private LinkedList makeInvoker() {
         return LinkedList.makeList(
                 MethodBuilder.INVOKESTATIC,
                 method.getDeclaringClass().getName().replace('.', '/'),
                 method.getName(),
                 internalMethodType(method)
         );
+    }
+
+    LinkedList getInvoker() {
+        return invoker;
     }
 
     boolean isMacro() {

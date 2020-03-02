@@ -57,18 +57,29 @@ public class MethodBuilder {
         int idx = 1;
         char c;
         boolean inClass = false;
+        // JVM field descriptors
+        // https://docs.oracle.com/javase/specs/jvms/se11/html/jvms-4.html#jvms-4.3.2
         while(')' != (c = internalName.charAt(idx))) {
             if(!inClass) {
                 switch (c) {
-                    case 'L':
+                    // TODO: handle double and long (they need two arg slots)
+                    case 'L': // start of a class
                         inClass = true;
-                    case 'I':
-                        // other cases here
+                    case 'B': // byte
+                    case 'C': // char
+                    // case 'D': // double
+                    case 'F': // float
+                    case 'I': // int
+                    // case 'J': // long
+                    case 'S': // short
+                    case 'Z': // bool
                         count ++;
+                    case '[':
+                        // each '[' only adds dimension, doesn't change arg counts
                         break;
                     default:
                         // error?
-                        break;
+                        throw new RuntimeException();
                 }
             } else if(c == ';'){
                 inClass = false;
@@ -108,6 +119,7 @@ public class MethodBuilder {
     // immutable values
     private final Symbol name;
     private final int paramCount;
+    private final boolean isMacro, isVarargs;
     // generated before assembly
     private ArrayList<Object> codes;
 
@@ -117,9 +129,15 @@ public class MethodBuilder {
     private ArrayList<StackMapFrame> stackMapTable;
     private ArrayList<Object> byteops;
 
-    MethodBuilder(Symbol name, int paramCount){
+    MethodBuilder(Symbol name, int paramCount) {
+        this(name, paramCount, false, false);
+    }
+
+    MethodBuilder(Symbol name, int paramCount, boolean isMacro, boolean isVarargs){
         this.name = name;
         this.paramCount = paramCount;
+        this.isMacro = isMacro;
+        this.isVarargs = isVarargs;
         codes = new ArrayList<>();
         stackMapTable = new ArrayList<>();
     }
@@ -157,7 +175,7 @@ public class MethodBuilder {
         // TODO: generate accessor flags
         Utils.putShort(bytes, (short)0x0009); // public static
         // u2 name index (utf8)
-        short x = pool.put(new ConstantPool.UTF8Info(name.toString()));
+        short x = pool.put(new ConstantPool.UTF8Info(name.getValue()));
         Utils.putShort(bytes, x);
         // u2 descriptor index (utf8)
         // TODO: generate descriptor index
@@ -165,7 +183,10 @@ public class MethodBuilder {
         Utils.putShort(bytes, x);
         // u2 number of attributes
         // TODO: generate attributes
-        Utils.putShort(bytes, (short)1);
+        short attributeCount = 1;
+        if(isMacro || isVarargs)
+            attributeCount ++;
+        Utils.putShort(bytes, attributeCount);
 
         // CODE ATTRIBUTE
         // MethodBuilder assembler = new MethodBuilder(paramCount);
@@ -180,13 +201,59 @@ public class MethodBuilder {
 
         Utils.putShort(bytes, (short)0); // zero exceptions
 
+        // attributes of the code attributes
         if(stackMapTable.length == 0) {
-            Utils.putShort(bytes, (short)0); // zero attributes
+            Utils.putShort(bytes, (short)0);
         } else {
             Utils.putShort(bytes, (short)1);
             Utils.appendBytes(bytes, stackMapTable);
         }
 
+        if(isMacro || isVarargs) {
+            byte[] annotations = assembleAnnotations(builder);
+            Utils.appendBytes(bytes, annotations);
+        }
+
+        return Utils.toByteArray(bytes);
+    }
+
+    public byte[] assembleAnnotations(ClassBuilder builder) {
+        ArrayList<Byte> bytes = new ArrayList<>();
+        short x = builder.pool.put(new ConstantPool.UTF8Info("RuntimeVisibleAnnotations"));
+
+        Utils.putShort(bytes, x);
+        // length of annotations, to be calculated at the end
+        Utils.putInt(bytes, -1);
+
+        // one annotation
+        short annotationCount = 0;
+        if(isVarargs)
+            annotationCount ++;
+        if(isMacro)
+            annotationCount ++;
+        Utils.putShort(bytes, annotationCount);
+
+        if(isMacro) {
+            x = builder.pool.put(new ConstantPool.UTF8Info("Lio/github/whetfire/lateral/Macro;"));
+            Utils.putShort(bytes, x);
+            // no values held by varargs annotation
+            Utils.putShort(bytes, (byte) 0);
+        }
+
+        if(isVarargs) {
+            // varargs annotation
+            x = builder.pool.put(new ConstantPool.UTF8Info("Lio/github/whetfire/lateral/Varargs;"));
+            Utils.putShort(bytes, x);
+            // no values held by varargs annotation
+            Utils.putShort(bytes, (byte) 0);
+        }
+
+        // calculate byte length, ignoring first six bytes
+        int byteLength = bytes.size() - 6;
+        bytes.set(2, (byte)((byteLength >> 24) & 0xFF));
+        bytes.set(3, (byte)((byteLength >> 16) & 0xFF));
+        bytes.set(4, (byte)((byteLength >> 8) & 0xFF));
+        bytes.set(5, (byte)(byteLength & 0xFF));
         return Utils.toByteArray(bytes);
     }
 
@@ -196,7 +263,7 @@ public class MethodBuilder {
      * are the appropriate arguments to the opcode.
      * Simple op codes that do not need arguments are handled automatically by assembleCode.
      * @param builder ClassBuilder to which class references are resolved
-     * @param compOp LinkedList containg the complexOp.
+     * @param compOp LinkedList containing the complexOp.
      */
     private void complexOp(ClassBuilder builder, LinkedList compOp) {
         Keyword kop = (Keyword)LinkedList.first(compOp);
@@ -389,10 +456,8 @@ public class MethodBuilder {
                 maxLocals = localCount;
         }
 
-        // System.out.println("bytes =====");
         ArrayList<Byte> bytes = new ArrayList<>(byteops.size());
         for(Object op : byteops) {
-            // System.out.println(op);
             if(op instanceof Byte) {
                 bytes.add((Byte)op);
             } else {
@@ -543,26 +608,6 @@ public class MethodBuilder {
 
         public String toString() {
             return String.format("[JumpLabel %X]", hashCode());
-        }
-    }
-
-    static class LocalLabel {
-        int localCount;
-        int byteCodePosition;
-
-        LocalLabel(int localCount) {
-            this.localCount = localCount;
-        }
-
-        public boolean equals(Object obj) {
-            if(this == obj) {
-                return true;
-            } else if(obj instanceof LocalLabel) {
-                return this.localCount == ((LocalLabel) obj).localCount &&
-                        this.byteCodePosition == ((LocalLabel) obj).byteCodePosition;
-            } else {
-                return false;
-            }
         }
     }
 }

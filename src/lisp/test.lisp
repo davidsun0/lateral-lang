@@ -1,4 +1,7 @@
+(defun asdf (a :rest b)
+  (list a b))
 
+(asdf 1 2 3 4 5)
 
 (defmacro prep (a b)
   (let (LinkedList     "io/github/whetfire/lateral/LinkedList"
@@ -13,7 +16,11 @@
           (list :invokespecial LinkedList "<init>"
                 "(Ljava/lang/Object;Lio/github/whetfire/lateral/LinkedList;)V"))))
 
-(defun cons1 (a b)
+(defun cons (a b)
   (prep a b))
 
-(cons1 1 null)
+cons
+
+(cons 1 null)
+
+asdfsdfajk

@@ -27,6 +27,10 @@ public final class Symbol {
             return obj instanceof Symbol && value.equals(((Symbol) obj).value);
     }
 
+    public String getValue() {
+        return value;
+    }
+
     @Override
     public String toString() {
         return value;

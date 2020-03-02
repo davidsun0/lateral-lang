@@ -1,5 +1,6 @@
 package io.github.whetfire.lateral;
 
+import java.lang.annotation.Annotation;
 import java.lang.invoke.*;
 import java.lang.reflect.Method;
 
@@ -44,18 +45,6 @@ public class Lang {
         return null;
     }
 
-    public static Object cond(Object ast) {
-        return ast;
-    }
-
-    public static Integer sum(Integer a, Integer b) {
-        return a + b;
-    }
-
-    public static Integer sub(Integer a, Integer b) {
-        return a - b;
-    }
-
     public static CallSite langBSM(
             MethodHandles.Lookup callerClass, String dynMethodName, MethodType dynMethodType)
         throws Throwable {
@@ -70,21 +59,14 @@ public class Lang {
         return new ConstantCallSite(mh);
     }
 
-    public static String jvmClassName(Class clazz) {
-        return 'L' + clazz.getName().replace('.', '/') + ';';
-    }
-
     public static void main(String[] args) {
         try {
             Method m = Lang.class.getMethod("cons", Object.class, Object.class);
-            System.out.println(jvmClassName(m.getDeclaringClass()));
-            System.out.println(m.getName());
-            // System.out.println(m.getParameterTypes());
-            for(Class clazz : m.getParameterTypes()) {
-                System.out.println(jvmClassName(clazz));
+            System.out.println(m.isAnnotationPresent(Macro.class));
+            for(Annotation a : m.getDeclaredAnnotations()) {
+                System.out.println(a);
             }
-            System.out.println("return: " + jvmClassName(m.getReturnType()));
-            System.out.println(m);
+
         } catch (Exception e) {
             e.printStackTrace();
         }

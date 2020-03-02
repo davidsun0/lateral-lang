@@ -61,7 +61,7 @@ public class ClassBuilder {
     }
 
     public void writeToFile(String path) {
-        try(FileOutputStream stream = new FileOutputStream("MyClass.class")) {
+        try(FileOutputStream stream = new FileOutputStream(path)) {
             stream.write(toBytes());
         } catch (IOException e) {
             e.printStackTrace();
