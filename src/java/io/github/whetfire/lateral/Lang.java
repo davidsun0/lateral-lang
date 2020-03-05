@@ -5,10 +5,16 @@ import java.lang.invoke.*;
 import java.lang.reflect.Method;
 
 public class Lang {
+
+    // TODO: move gensym to Symbol?
     static private int gensymCount = -1;
-    public static Object gensym() {
+    public static Symbol gensym() {
+        return gensym("gensym_");
+    }
+
+    public static Symbol gensym(String prefix) {
         gensymCount ++;
-        return Symbol.makeSymbol("gensym#" + gensymCount);
+        return Symbol.makeSymbol(prefix + gensymCount);
     }
 
     public static Object car(Object a) {

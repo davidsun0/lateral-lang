@@ -24,6 +24,9 @@ public class LinkedList implements Iterable<Object>{
     }
 
     public static LinkedList makeList(Object ... values) {
+        if(values.length == 0) {
+            return new LinkedList(null, null);
+        }
         LinkedList res = null;
         for (int i = values.length - 1; i >= 0; i--) {
             res = new LinkedList(values[i], res);

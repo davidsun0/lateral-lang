@@ -91,6 +91,7 @@ public class MethodBuilder {
 
     static class StackMapFrame {
         int stackHeight;
+        Class<?>[] virtualStack;
         int localCount;
         int byteCodePosition;
 
@@ -126,6 +127,9 @@ public class MethodBuilder {
     // for use during assembly
     private int localCount, stackHeight, bytecount;
     private int maxLocals, maxStack;
+    private HashMap<Symbol, StackMapFrame> jumpMap;
+    private ArrayList<Class<?>> virtualStack;
+    // private ArrayList<Class<?>> virtualLocals;
     private ArrayList<StackMapFrame> stackMapTable;
     private ArrayList<Object> byteops;
 
@@ -138,6 +142,8 @@ public class MethodBuilder {
         this.paramCount = paramCount;
         this.isMacro = isMacro;
         this.isVarargs = isVarargs;
+
+        jumpMap = new HashMap<>();
         codes = new ArrayList<>();
         stackMapTable = new ArrayList<>();
     }
@@ -269,12 +275,18 @@ public class MethodBuilder {
         Keyword kop = (Keyword)LinkedList.first(compOp);
         if(LABEL.equals(kop)) {
             // store label
-            JumpLabel target = (JumpLabel)LinkedList.second(compOp);
-            if(target.stackHeight < 0)
+            // JumpLabel target = (JumpLabel)LinkedList.second(compOp);
+            Symbol targetSym = (Symbol)LinkedList.second(compOp);
+            StackMapFrame target = jumpMap.get(targetSym);
+            if(target == null || target.stackHeight < 0)
                 asmError("backwards jump");
             stackHeight = target.stackHeight;
-            stackMapTable.add(new StackMapFrame(stackHeight, localCount, bytecount));
+
+            target.localCount = localCount;
             target.byteCodePosition = bytecount;
+            stackMapTable.add(target);
+            // stackMapTable.add(new StackMapFrame(stackHeight, localCount, bytecount));
+            // target.byteCodePosition = bytecount;
         } else if(LOCALLABEL.equals(kop)) {
             localCount = (Integer)LinkedList.second(compOp);
             stackMapTable.add(new StackMapFrame(stackHeight, localCount, bytecount));
@@ -288,8 +300,15 @@ public class MethodBuilder {
                 stackHeight --;
             }
             // set stack height at jump target
+
+            Symbol targetSym = (Symbol)LinkedList.second(compOp);
+            StackMapFrame target = new StackMapFrame(stackHeight, -1, -1);
+            jumpMap.put(targetSym, target);
+            /*
             JumpLabel target = (JumpLabel)LinkedList.second(compOp);
             target.stackHeight = stackHeight;
+            */
+            // asmError(compOp);
         } else if(ALOAD.equals(kop)) {
             int idx = (Integer) LinkedList.second(compOp);
             if (idx < 4) {
@@ -463,9 +482,17 @@ public class MethodBuilder {
             } else {
                 LinkedList list = (LinkedList)op;
                 Object optype = LinkedList.first(list);
+                /*
                 JumpLabel target = (JumpLabel)LinkedList.second(list);
                 int offset = target.byteCodePosition - bytes.size();
                 System.out.printf("%s %d %d%n", list, target.byteCodePosition, bytes.size());
+                */
+
+                Symbol targetSym = (Symbol)LinkedList.second(list);
+                StackMapFrame target = jumpMap.get(targetSym);
+                int offset = target.byteCodePosition - bytes.size();
+                System.out.printf("%s %d %d%n", list, target.byteCodePosition, bytes.size());
+
                 if (IFNONNULL.equals(optype)) {
                     bytes.add((byte)0xC7);
                 } else if (IFNULL.equals(optype)) {
@@ -585,13 +612,17 @@ public class MethodBuilder {
         return Utils.toByteArray(bytes);
     }
 
-    static class JumpLabel {
+    /*
+    private class JumpLabel {
         int stackHeight;
+        Class<?>[] stack;
         int byteCodePosition;
+        boolean isInitialized;
 
         JumpLabel() {
             stackHeight = -1;
             byteCodePosition = -1;
+            isInitialized = false;
         }
 
         public boolean equals(Object obj) {
@@ -610,4 +641,5 @@ public class MethodBuilder {
             return String.format("[JumpLabel %X]", hashCode());
         }
     }
+    */
 }

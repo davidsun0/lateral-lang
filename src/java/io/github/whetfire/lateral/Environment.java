@@ -8,8 +8,9 @@ public class Environment {
     private static HashMap<Symbol, Object> symMap = new HashMap<>();
     private static DynamicsManager dynamicsManager = new DynamicsManager();
 
-    public static void insert(Symbol symbol, Object obj) {
+    public static Object insert(Symbol symbol, Object obj) {
         symMap.put(symbol, obj);
+        return obj;
     }
 
     public static Lambda insertMethod(Symbol name, MethodBuilder methodBuilder) {

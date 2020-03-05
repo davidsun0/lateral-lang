@@ -1,9 +1,9 @@
 package io.github.whetfire.lateral;
 
 import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.security.Key;
 import java.util.*;
 
 public class Compiler {
@@ -31,17 +31,26 @@ public class Compiler {
             "io/github/whetfire/lateral/Environment", "get",
             "(Lio/github/whetfire/lateral/Symbol;)Ljava/lang/Object;"
     );
+    static LinkedList ENVIR_STORE = LinkedList.makeList(
+            Keyword.makeKeyword("invokestatic"),
+            "io/github/whetfire/lateral/Environment", "insert",
+            "(Lio/github/whetfire/lateral/Symbol;Ljava/lang/Object;)Ljava/lang/Object;"
+    );
 
     static LinkedList CONS;
     static Symbol QUOTE_SYM = Symbol.makeSymbol("quote");
+
     static Symbol IF_SYM = Symbol.makeSymbol("if");
     static Symbol AND_SYM = Symbol.makeSymbol("and");
     static Symbol OR_SYM = Symbol.makeSymbol("or");
+
     static Symbol DEF_SYM = Symbol.makeSymbol("def");
     static Symbol DEFUN_SYM = Symbol.makeSymbol("defun");
     static Symbol DEFMACRO_SYM = Symbol.makeSymbol("defmacro");
     static Symbol LET_SYM = Symbol.makeSymbol("let");
+
     static Symbol ASM_SYM = Symbol.makeSymbol("asm");
+    static Symbol DEASM_SYM = Symbol.makeSymbol("de-asm");
     static Symbol LIST_ASM = Symbol.makeSymbol("list");
 
     static {
@@ -171,6 +180,8 @@ public class Compiler {
             if (QUOTE_SYM.equals(head)) {
                 // TODO: assert that quote only has 1 argument
                 compileQuote(expr.getValue());
+                if(isTail)
+                    methodBuilder.insertOpCode(MethodBuilder.ARETURN);
             } else if(DEF_SYM.equals(head)) {
                 // insert into environment
                 // macro expand name?
@@ -179,32 +190,34 @@ public class Compiler {
                 compile(LinkedList.second(expr), locals, false);
                 // somehow insert into environment
                 // return value
-                throw new RuntimeException();
+                methodBuilder.insertOpCode(ENVIR_STORE);
+                if(isTail)
+                    methodBuilder.insertOpCode(MethodBuilder.ARETURN);
             } else if (IF_SYM.equals(head)) {
                 if (LinkedList.length(expr) != 3) {
                     throw new SyntaxException("if expects 3 arguments in body: test, then, else.");
                 }
                 // TODO: extend to if-else with arbitrary number of branches
-                MethodBuilder.JumpLabel elseLab = new MethodBuilder.JumpLabel();
-                MethodBuilder.JumpLabel endLab = new MethodBuilder.JumpLabel();
+                // MethodBuilder.JumpLabel elseLab = new MethodBuilder.JumpLabel();
+                // MethodBuilder.JumpLabel endLab = new MethodBuilder.JumpLabel();
+                Symbol elseLab = Lang.gensym("else");
+                Symbol endLab = Lang.gensym("end");
 
                 // TEST
                 compile(LinkedList.first(expr), locals, false);
                 methodBuilder.insertOpCode(MethodBuilder.IFNULL, elseLab);
                 // TRUE BRANCH
                 compile(LinkedList.second(expr), locals, isTail);
-                if(isTail) {
-                    methodBuilder.insertOpCode(MethodBuilder.ARETURN);
-                } else {
+                if(!isTail) {
+                    // if tail, the inner expression will return automatically
                     methodBuilder.insertOpCode(MethodBuilder.GOTO, endLab);
                 }
                 // ELSE BRANCH
                 methodBuilder.insertOpCode(MethodBuilder.LABEL, elseLab);
                 compile(LinkedList.third(expr), locals, isTail);
                 // END
-                if(isTail) {
-                    methodBuilder.insertOpCode(MethodBuilder.ARETURN);
-                } else {
+                if(!isTail) {
+                    // if tail, the inner expression will return automatically
                     methodBuilder.insertOpCode(MethodBuilder.LABEL, endLab);
                 }
             } else if (OR_SYM.equals(head) || AND_SYM.equals(head)) {
@@ -217,7 +230,8 @@ public class Compiler {
                     else
                         methodBuilder.insertOpCode(PUSH_TRUE);
                 } else {
-                    MethodBuilder.JumpLabel endLab = new MethodBuilder.JumpLabel();
+                    // MethodBuilder.JumpLabel endLab = new MethodBuilder.JumpLabel();
+                    Symbol endLab = Lang.gensym("end");
                     while (expr.getNext() != null) {
                         compile(expr.getValue(), locals, false);
                         methodBuilder.insertOpCode(Keyword.makeKeyword("dup"));
@@ -272,26 +286,13 @@ public class Compiler {
                 // methodBuilder.insertOpCode(MethodBuilder.LOCALLABEL, localCount);
             } else if(ASM_SYM.equals(head)) {
                 // literal bytecode assembly; inject its values directly
+                // TODO: better de-asm with tree traversal
                 for (Object o : expr) {
-                    if(o instanceof Symbol) {
-                        /*
-                        way for asm to insert variables
-                        not sure if this is a good idea
-                         */
-                        Symbol symbol = (Symbol) o;
-                        int index = -1;
-                        for (int i = locals.size() - 1; i >= 0; i--) {
-                            if (symbol.equals(locals.get(i))) {
-                                index = i;
-                                break;
-                            }
-                        }
-                        if (index >= 0) {
-                            methodBuilder.insertOpCode(MethodBuilder.ALOAD, index);
-                        } else {
-                            System.out.println(o);
-                            throw new SyntaxException();
-                        }
+                    if(o instanceof LinkedList && DEASM_SYM.equals(((LinkedList) o).getValue())) {
+                        // deasm cancels out asm and compilation continues normally
+                        Object deasm = ((LinkedList) o).getNext().getValue();
+                        // should be asm writer's responsibility to determine when to return
+                        compile(deasm, locals, false);
                     } else {
                         // asm command
                         methodBuilder.insertOpCode(o);
@@ -328,8 +329,10 @@ public class Compiler {
                     throw new RuntimeException(head + " can't be used as a function call");
                 }
                 // evaluate each sub expression
-                for (Object sub : expr) {
-                    compile(sub, locals, false);
+                if(expr != null) {
+                    for (Object sub : expr) {
+                        compile(sub, locals, false);
+                    }
                 }
 
                 if(funcall.isVarargs) {
@@ -430,7 +433,7 @@ public class Compiler {
         }
         int paramCount = LinkedList.length(params);
         boolean isVarargs = false;
-        if(paramCount > 2 && Keyword.makeKeyword("rest").equals(LinkedList.nth(params, paramCount - 2))) {
+        if(paramCount >= 2 && Keyword.makeKeyword("rest").equals(LinkedList.nth(params, paramCount - 2))) {
             paramCount --;
             isVarargs = true;
             Object[] newParams = new Object[paramCount];
@@ -468,25 +471,31 @@ public class Compiler {
         }
         methodBuilder = new MethodBuilder(Symbol.makeSymbol("main"), 0);
         compile(ast, new ArrayList<>(), true);
-        ClassBuilder builder = new ClassBuilder(genClassName());
+        String className = genClassName();
+        ClassBuilder builder = new ClassBuilder(className);
         builder.addMethod(methodBuilder);
         Class<?> clazz = Environment.defineTemporaryClass(builder);
         try {
             Method m = clazz.getMethod("main", (Class<?>[]) null);
             return m.invoke(null);
-        } catch (NoSuchMethodException | IllegalAccessException e) {
+            // } catch (NoSuchMethodException | IllegalAccessException e) {
+        } catch (VerifyError e) {
+            builder.writeToFile("./" + className + ".class");
             methodBuilder.printCodes();
             e.printStackTrace();
+            return null;
+        } catch (NoSuchMethodException | IllegalAccessException eb) {
+            eb.printStackTrace();
             return null;
         }
     }
 
-    public static void main(String[] args) throws FileNotFoundException {
+    public static void main(String[] args) throws IOException {
         Compiler compiler = new Compiler();
-        LispReader reader = new FileLispReader("./src/lisp/test.lisp");
+        LateralReader lateralReader = LateralReader.fileReader("./src/lisp/test.lisp");
 
         Object form;
-        while ((form = reader.readForm()) != null) {
+        while ((form = lateralReader.readForm()) != null) {
             try {
                 System.out.println(compiler.compileTopLevel(form));
             } catch (Exception e) {
