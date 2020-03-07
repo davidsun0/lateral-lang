@@ -1,7 +1,14 @@
 package io.github.whetfire.lateral;
 
+import java.lang.reflect.Type;
+import java.util.ArrayList;
 import java.util.Iterator;
 
+/**
+ * Parent class for all sequences.
+ * Sequences should never be null, instead using EmptySequence to represent either
+ * an empty sequence or the end of a sequence.
+ */
 public abstract class Sequence implements Iterable<Object> {
 
     public abstract Object first();
@@ -13,7 +20,9 @@ public abstract class Sequence implements Iterable<Object> {
     }
 
     public static Sequence cons(Object obj, Sequence sequence) {
-        return new LinkedList(obj, sequence);
+        if(sequence == null)
+            throw new RuntimeException("Sequence cannot be null");
+        return sequence.cons(obj);
     }
 
     public boolean isEmpty() {
@@ -50,6 +59,22 @@ public abstract class Sequence implements Iterable<Object> {
         return count;
     }
 
+    public static Sequence concat(Sequence seqs) {
+        ArrayList<Object> forms = new ArrayList<>();
+        while(!seqs.isEmpty()) {
+            if(seqs.first() instanceof Sequence) {
+                Sequence seq = (Sequence) seqs.first();
+                while(!seq.isEmpty()) {
+                    forms.add(seq.first());
+                    seq = seq.rest();
+                }
+            } else {
+                throw new TypeException(seqs.first().getClass(), Sequence.class);
+            }
+            seqs = seqs.rest();
+        }
+        return LinkedList.makeList(forms.toArray());
+    }
 
     public final Iterator<Object> iterator() {
         return new SequenceIterator(this);
@@ -66,7 +91,7 @@ public abstract class Sequence implements Iterable<Object> {
                 builder.append(list.first());
                 builder.append('\"');
             } else {
-                builder.append(list.first().toString());
+                builder.append(list.first());
             }
             list = list.rest();
             if(!list.isEmpty()) {

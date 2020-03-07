@@ -1,9 +1,6 @@
 package io.github.whetfire.lateral;
 
-import java.io.BufferedReader;
-import java.io.FileReader;
-import java.io.IOException;
-import java.io.Reader;
+import java.io.*;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -13,12 +10,22 @@ public class LispReader {
     private Reader stream;
     private Deque<Character> deque = new ArrayDeque<>();
 
+    static public Symbol QUOTE = Symbol.makeSymbol("quote");
+    static public Symbol UNQUOTE = Symbol.makeSymbol("unquote");
+    static public Symbol UNQUOTE_SPLICING = Symbol.makeSymbol("unquote-splicing");
+    static public Symbol LIST = Symbol.makeSymbol("list");
+    static public Symbol CONCAT = Symbol.makeSymbol("concat");
+
     public LispReader(Reader reader) {
         this.stream = reader;
     }
 
     public static LispReader fileReader(String path) throws IOException {
         return new LispReader(new BufferedReader(new FileReader(path)));
+    }
+
+    public static LispReader stringReader(String value) {
+        return new LispReader(new StringReader(value));
     }
 
     private boolean hasNextChar() throws IOException {
@@ -121,22 +128,32 @@ public class LispReader {
     }
 
     Object readForm() throws IOException {
-        consumeWhitespace();
+        while(hasNextChar()) {
+            consumeWhitespace();
+            if(hasNextChar() && peekChar() == ';') {
+                consumeComment();
+            } else {
+                break;
+            }
+        }
+
         if(!hasNextChar())
             return null;
 
         char c = nextChar();
-        if(c == ';') {
-            consumeComment();
-            return readForm();
-        } else if(c == '"') {
+        if(c == '"') {
             return consumeString();
         } else if(c == '\'') {
-            LinkedList val = new LinkedList(readForm());
-            return new LinkedList(Symbol.makeSymbol("quote"), val);
+            return LinkedList.makeList(QUOTE, readForm());
         } else if(c == '`') {
-            LinkedList val = new LinkedList(readForm());
-            return new LinkedList(Symbol.makeSymbol("quasiquote"), val);
+            return readQuasiQuote();
+        } else if(c == ',') {
+            if(hasNextChar() && peekChar() == '@') {
+                nextChar(); // consume '@'
+                return LinkedList.makeList(UNQUOTE_SPLICING, readForm());
+            } else {
+                return LinkedList.makeList(UNQUOTE, readForm());
+            }
         }
         // reader macros here
 
@@ -164,6 +181,54 @@ public class LispReader {
             }
         }
         return readAtom(sb.toString());
+    }
+
+    private Sequence quasiQuoteHelper(Sequence list) {
+        ArrayList<Object> forms = new ArrayList<>();
+        forms.add(CONCAT);
+        while(!list.isEmpty()) {
+            Object head = list.first();
+            if(head instanceof Sequence) {
+                Sequence inner = (Sequence) head;
+                if (inner.first().equals(QUOTE)) {
+                    // `(... (quote x) ...) -> (concat ... (list (quote (quote x))) ...)
+                    forms.add(LinkedList.makeList(LIST, inner));
+                } else if (inner.first().equals(UNQUOTE_SPLICING)) {
+                    // `(... (uqs (a b c)) ...) -> (concat ... (a b c) ...)
+                    // inner.first() is "unquote-splcing", inner.second() is the inner body
+                    forms.add(inner.second());
+                } else if (inner.first().equals(UNQUOTE)) {
+                    // `(... (unquote x) ...) -> (concat ... (list x) ...)
+                    forms.add(LinkedList.makeList(LIST, inner.second()));
+                } else {
+                    // `(... (a b c) ...) -> (concat ... (list (concat ~expand a b c~)) ...)
+                    forms.add(LinkedList.makeList(LIST, quasiQuoteHelper(inner)));
+                }
+            } else {
+                // `(... x ...) -> (concat ... (list (quote x)) ...)
+                forms.add(LinkedList.makeList(LIST, LinkedList.makeList(QUOTE, head)));
+            }
+            list = list.rest();
+        }
+        return LinkedList.makeList(forms.toArray());
+    }
+
+    private Object readQuasiQuote() throws IOException {
+        Object quoteBody = readForm();
+        if(quoteBody == null) {
+            throw new RuntimeException("Unexpected EOF in readQuasiQuote");
+        } else if(quoteBody instanceof Sequence) {
+            Sequence seqBody = (Sequence) quoteBody;
+            if(seqBody.first().equals(UNQUOTE)) {
+                // TODO: not sure if this is in the right place
+                return seqBody.second();
+            } else {
+                return quasiQuoteHelper((Sequence) quoteBody);
+            }
+        } else {
+            // simple form is just quoted since it can't contain unquotes
+            return LinkedList.makeList(QUOTE, quoteBody);
+        }
     }
 
     public static void main(String[] args) throws IOException {

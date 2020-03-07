@@ -21,6 +21,7 @@ public final class Symbol {
 
     public static Symbol gensym(String prefix) {
         gensymCount ++;
+        // TODO: check if symbol exists already
         return Symbol.makeSymbol(prefix + gensymCount);
     }
 

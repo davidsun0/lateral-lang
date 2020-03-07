@@ -122,16 +122,21 @@ public class Compiler {
             } else {
                 // non-list objects
                 if(value == null) {
-                    methodBuilder.insertOpCode(Keyword.makeKeyword("aconst_null"));
+                    methodBuilder.insertOpCode(MethodBuilder.ACONST_NULL);
                 } else if (value.equals(EmptySequence.EMPTY_SEQUENCE)) {
                     // quoted empty list '()
                     methodBuilder.insertOpCode(EMPTY_LIST);
                 } else if (value instanceof Symbol) {
                     methodBuilder.insertOpCode(MethodBuilder.LDC, value.toString());
                     methodBuilder.insertOpCode(MAKE_SYM);
+                } else if (value instanceof Keyword) {
+                    methodBuilder.insertOpCode(MethodBuilder.LDC, ((Keyword) value).getValue());
+                    methodBuilder.insertOpCode(MAKE_KEY);
                 } else if (value instanceof Integer) {
                     methodBuilder.insertOpCode(MethodBuilder.ICONST, value);
                     methodBuilder.insertOpCode(PARSE_INT);
+                } else if (value instanceof String) {
+                    methodBuilder.insertOpCode(MethodBuilder.LDC, value);
                 } else {
                     throw new RuntimeException("Can't quote " + value);
                 }
@@ -182,7 +187,7 @@ public class Compiler {
             expr = expr.rest();
             // switch on head here for special forms:
             // quote, and, or, if/cond, let, lambda, def, defmacro
-            if (expr.isEmpty()) {
+            if (((Sequence)ast).isEmpty()) {
                 // special case of empty list
                 methodBuilder.insertOpCode(EMPTY_LIST);
                 if(isTail)
@@ -231,16 +236,15 @@ public class Compiler {
             } else if (OR_SYM.equals(head) || AND_SYM.equals(head)) {
                 // or: return first true value
                 // and : return first false value
-                if (expr == null) {
+                if (expr.isEmpty()) {
                     // empty expressions
                     if (OR_SYM.equals(head))
                         methodBuilder.insertOpCode(MethodBuilder.ACONST_NULL);
                     else
                         methodBuilder.insertOpCode(PUSH_TRUE);
                 } else {
-                    // MethodBuilder.JumpLabel endLab = new MethodBuilder.JumpLabel();
                     Symbol endLab = Symbol.gensym("end");
-                    while (expr.rest() != null) {
+                    while (!expr.rest().isEmpty()) {
                         compile(expr.first(), locals, false);
                         methodBuilder.insertOpCode(Keyword.makeKeyword("dup"));
                         if (OR_SYM.equals(head))
@@ -254,9 +258,10 @@ public class Compiler {
                     // when result depends on last element
                     compile(expr.first(), locals, false);
                     methodBuilder.insertOpCode(MethodBuilder.LABEL, endLab);
-                    if(isTail) {
-                        methodBuilder.insertOpCode(MethodBuilder.ARETURN);
-                    }
+                }
+
+                if(isTail) {
+                    methodBuilder.insertOpCode(MethodBuilder.ARETURN);
                 }
             } else if (LET_SYM.equals(head)) {
                 // TODO: assert that let has 2 arguments
@@ -336,7 +341,7 @@ public class Compiler {
                     throw new RuntimeException(head + " can't be used as a function call");
                 }
                 // evaluate each sub expression
-                if(expr != null) {
+                if(!expr.isEmpty()) {
                     for (Object sub : expr) {
                         compile(sub, locals, false);
                     }

@@ -27,6 +27,7 @@ public class MethodBuilder {
 
     static Keyword INVOKESTATIC = Keyword.makeKeyword("invokestatic");
     static Keyword INVOKESPECIAL = Keyword.makeKeyword("invokespecial");
+    static Keyword INVOKEVIRTUAL = Keyword.makeKeyword("invokevirtual");
 
     static Keyword ALOAD = Keyword.makeKeyword("aload");
     static Keyword ASTORE = Keyword.makeKeyword("astore");
@@ -287,7 +288,6 @@ public class MethodBuilder {
         } else if(LOCALLABEL.equals(kop)) {
             localCount = (Integer) compOp.second();
             stackMapTable.add(new StackMapFrame(stackHeight, localCount, bytecount));
-            // asmError(kop);
         } else if(GOTO.equals(kop) || IFNONNULL.equals(kop) || IFNULL.equals(kop)) {
             // defer assembling jumps to second pass
             byteops.add(compOp);
@@ -366,6 +366,7 @@ public class MethodBuilder {
             bytecount += 3;
             stackHeight++;
         } else if(INVOKESTATIC.equals(kop)) {
+            // TODO: merge all the invokes together (except for invokedynamic?)
             byteops.add((byte) 0xB8);
             String methodType = (String) compOp.fourth();
             ConstantPool.MethodRefInfo methodRefInfo = new ConstantPool.MethodRefInfo(
@@ -386,6 +387,25 @@ public class MethodBuilder {
         } else if(INVOKESPECIAL.equals(kop)) {
             // same as invokestatic
             byteops.add((byte) 0xB7);
+            String methodType = (String) compOp.fourth();
+            ConstantPool.MethodRefInfo methodRefInfo = new ConstantPool.MethodRefInfo(
+                    (String) compOp.second(),
+                    (String) compOp.third(),
+                    methodType
+            );
+            short x = builder.pool.put(methodRefInfo);
+            byteops.add((byte) ((x >> 8) & 0xFF));
+            byteops.add((byte) (x & 0xFF));
+            bytecount += 3;
+            // TODO: generate stack height in a better way
+            // to find the new stack height, subtract number of arguments
+            stackHeight -= countArguments(methodType);
+            // add the returned object to the stack (if it isn't void)
+            if (methodType.charAt(methodType.length() - 1) != 'V')
+                stackHeight++;
+        } else if(INVOKEVIRTUAL.equals(kop)) {
+            // same as invokestatic
+            byteops.add((byte) 0xB6);
             String methodType = (String) compOp.fourth();
             ConstantPool.MethodRefInfo methodRefInfo = new ConstantPool.MethodRefInfo(
                     (String) compOp.second(),
@@ -475,7 +495,7 @@ public class MethodBuilder {
                 Symbol targetSym = (Symbol) list.second();
                 StackMapFrame target = jumpMap.get(targetSym);
                 int offset = target.byteCodePosition - bytes.size();
-                System.out.printf("%s %d %d%n", list, target.byteCodePosition, bytes.size());
+                // System.out.printf("%s %d %d%n", list, target.byteCodePosition, bytes.size());
 
                 if (IFNONNULL.equals(optype)) {
                     bytes.add((byte)0xC7);

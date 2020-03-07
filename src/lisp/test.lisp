@@ -7,51 +7,61 @@ LinkedList
                       "gensym"
                       "()Lio/github/whetfire/lateral/Symbol;")))
 
+(defun concat (:rest lst)
+  (asm (de-asm lst)
+       (:checkcast "io/github/whetfire/lateral/Sequence")
+       (:invokestatic "io/github/whetfire/lateral/Sequence"
+                      "concat"
+                      "(Lio/github/whetfire/lateral/Sequence;)Lio/github/whetfire/lateral/Sequence;")))
+
+(concat (list 1 2) (list 3 4))
+
 (gensym)
 
-(if :test
-  1
-  2)
+`test
 
-;    `test
+;`(a b ,c ,@(d e f) g)
 
-;(defmacro while (condition body)
-;  (let (looplab (gensym))
-;    `(asm (:goto ,looplab)
-;          (de-asm ,body)
-;          (:label ,looplab)
-;          (de-asm ,condition)
-;          :aconst_null)))
+(let (x 0)
+  ``,,x)
 
-'asdf
+(defmacro while (condition body)
+  (let (looplab (gensym))
+    `(asm (:goto ,looplab)
+          (de-asm ,body)
+          (:label ,looplab)
+          (de-asm ,condition)
+          :aconst_null)))
 
-'()
-()
+(defmacro asm-if (condition then else)
+  (let (elselab (gensym)
+        endlab  (gensym))
+    `(asm (de-asm ,condition)
+          (:ifnull ,elselab)
+          (de-asm ,then)
+          (:goto ,endlab)
+          (:label ,elselab)
+          (de-asm ,else)
+          (:label ,endlab))))
 
-null
-
-;(while 1 2)
+(asm-if null
+  (list 1 2)
+  (list 3 4))
 
 (defmacro prep (a b)
-  (let (LinkedList     "io/github/whetfire/lateral/LinkedList"
-        Sequence       "io/github/whetfire/lateral/Sequence"
-        LinkedListType "Lio/github/whetfire/lateral/LinkedList;"
-        ObjectType     "Ljava/lang/Object;")
-    (list (quote asm)
-          (list :new LinkedList)
-          :dup
-          (list (quote de-asm) a)
-          (list (quote de-asm) b)
-          (list :checkcast Sequence)
-          (list :invokespecial LinkedList "<init>"
-                "(Ljava/lang/Object;Lio/github/whetfire/lateral/Sequence;)V"))))
+  `(asm (de-asm ,b)
+        (:checkcast "io/github/whetfire/lateral/Sequence")
+        (de-asm ,a)
+        (:invokevirtual "io/github/whetfire/lateral/Sequence"
+                        "cons"
+                        "(Ljava/lang/Object;)Lio/github/whetfire/lateral/Sequence;")))
 
 (defun cons (a b)
   (prep a b))
 
-cons
+(list cons gensym)
 
-(cons 1 '())
+(cons 2 (cons 1 '()))
 
 
 

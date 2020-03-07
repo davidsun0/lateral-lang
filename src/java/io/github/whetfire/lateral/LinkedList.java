@@ -11,7 +11,7 @@ public class LinkedList extends Sequence {
     public LinkedList(Object value, Sequence next){
         this.value = value;
         if(next == null)
-            throw new RuntimeException();
+            throw new RuntimeException("Sequence cannot be null");
         this.next = next;
     }
 
