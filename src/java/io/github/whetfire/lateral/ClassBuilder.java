@@ -23,9 +23,7 @@ public class ClassBuilder {
         if(compiledBytes != null)
             return compiledBytes;
 
-        // TODO: generate class names
         short objIdx = pool.put(new ConstantPool.ClassInfo("java/lang/Object"));
-        // short clsIdx = pool.put(new ConstantPool.ClassInfo("MyClass"));
         short clsIdx = pool.put(new ConstantPool.ClassInfo(name));
         ArrayList<byte[]> methodBytes = new ArrayList<>(methods.size());
         for(MethodBuilder method : methods) {

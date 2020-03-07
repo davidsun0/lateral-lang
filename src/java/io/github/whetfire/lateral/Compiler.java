@@ -1,43 +1,48 @@
 package io.github.whetfire.lateral;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.*;
 
 public class Compiler {
-    static LinkedList PUSH_TRUE = LinkedList.makeList(
+    static Sequence PUSH_TRUE = LinkedList.makeList(
             Keyword.makeKeyword("getstatic"),
             "java/lang/Boolean", "TRUE", "Ljava/lang/Boolean;"
     );
-    static LinkedList PARSE_INT = LinkedList.makeList(
+    static Sequence EMPTY_LIST = LinkedList.makeList(
+            Keyword.makeKeyword("getstatic"),
+            "io/github/whetfire/lateral/EmptySequence", "EMPTY_SEQUENCE",
+            "Lio/github/whetfire/lateral/Sequence;"
+    );
+
+    static Sequence PARSE_INT = LinkedList.makeList(
             Keyword.makeKeyword("invokestatic"),
             "java/lang/Integer", "valueOf", "(I)Ljava/lang/Integer;"
     );
-    static LinkedList MAKE_SYM = LinkedList.makeList(
+    static Sequence MAKE_SYM = LinkedList.makeList(
             Keyword.makeKeyword("invokestatic"),
             "io/github/whetfire/lateral/Symbol", "makeSymbol",
             "(Ljava/lang/String;)Lio/github/whetfire/lateral/Symbol;"
     );
-    static LinkedList MAKE_KEY = LinkedList.makeList(
+    static Sequence MAKE_KEY = LinkedList.makeList(
             Keyword.makeKeyword("invokestatic"),
             "io/github/whetfire/lateral/Keyword", "makeKeyword",
             "(Ljava/lang/String;)Lio/github/whetfire/lateral/Keyword;"
     );
 
-    static LinkedList ENVIR_LOOKUP = LinkedList.makeList(
+    static Sequence ENVIR_LOOKUP = LinkedList.makeList(
             Keyword.makeKeyword("invokestatic"),
             "io/github/whetfire/lateral/Environment", "get",
             "(Lio/github/whetfire/lateral/Symbol;)Ljava/lang/Object;"
     );
-    static LinkedList ENVIR_STORE = LinkedList.makeList(
+    static Sequence ENVIR_STORE = LinkedList.makeList(
             Keyword.makeKeyword("invokestatic"),
             "io/github/whetfire/lateral/Environment", "insert",
             "(Lio/github/whetfire/lateral/Symbol;Ljava/lang/Object;)Ljava/lang/Object;"
     );
 
-    static LinkedList CONS;
+    static Sequence CONS;
     static Symbol QUOTE_SYM = Symbol.makeSymbol("quote");
 
     static Symbol IF_SYM = Symbol.makeSymbol("if");
@@ -55,20 +60,18 @@ public class Compiler {
 
     static {
         CONS = LinkedList.makeList(MethodBuilder.INVOKESTATIC,
-                "io/github/whetfire/lateral/Lang", "cons", Lambda.makeMethodSignature(2));
+                "io/github/whetfire/lateral/Sequence", "cons",
+                "(Ljava/lang/Object;Lio/github/whetfire/lateral/Sequence;)Lio/github/whetfire/lateral/Sequence;"
+        );
     }
 
     static class CompilationFrame {
-        LinkedList ast; // holds the whole compilation expression
-        LinkedList current; // first value in current is the next item to compile
+        Sequence ast; // holds the whole compilation expression
+        Sequence current; // first value in current is the rest item to compile
 
-        CompilationFrame(LinkedList ast) {
-            this(ast, ast, false);
-        }
-
-        CompilationFrame(LinkedList ast, LinkedList current, boolean isTail) {
-            this.current = current;
+        CompilationFrame(Sequence ast) {
             this.ast = ast;
+            this.current = ast;
         }
     }
 
@@ -89,40 +92,42 @@ public class Compiler {
         Deque<CompilationFrame> stack = new ArrayDeque<>();
         // base frame is special; it doesn't have a base ast value
         // this allows simple objects to be compiled with the same logic that handles lists
-        stack.push(new CompilationFrame(new LinkedList(ast, null)));
+        stack.push(new CompilationFrame(new LinkedList(ast)));
         while (!stack.isEmpty()) {
             CompilationFrame frame = stack.pop();
-            LinkedList expr = frame.current;
+            Sequence expr = frame.current;
 
             // done with the list on the current level
-            if (expr == null) {
+            if (expr.isEmpty()) {
                 // build a list from symbols on the stack
                 if (stack.isEmpty()) {
                     // reached base frame; exit
                     break;
                 } else {
-                    methodBuilder.insertOpCode(Keyword.makeKeyword("aconst_null"));
-                    for (int i = 0; i < LinkedList.length(frame.ast); i++) {
+                    methodBuilder.insertOpCode(EMPTY_LIST);
+                    for (int i = 0; i < frame.ast.length(); i++) {
                         methodBuilder.insertOpCode(CONS);
                     }
                 }
                 continue;
             }
 
-            Object value = expr.getValue();
-            if (value instanceof LinkedList) {
+            Object value = expr.first();
+            if (value instanceof Sequence && !((Sequence) value).isEmpty()) {
                 // value is a list; recurse.
                 // push parent expression back onto the stack
-                frame.current = expr.getNext();
+                frame.current = expr.rest();
                 stack.push(frame);
-                stack.push(new CompilationFrame((LinkedList) value));
+                stack.push(new CompilationFrame((Sequence) value));
             } else {
                 // non-list objects
-                if (value == null) {
-                    // quoted empty list '()
+                if(value == null) {
                     methodBuilder.insertOpCode(Keyword.makeKeyword("aconst_null"));
+                } else if (value.equals(EmptySequence.EMPTY_SEQUENCE)) {
+                    // quoted empty list '()
+                    methodBuilder.insertOpCode(EMPTY_LIST);
                 } else if (value instanceof Symbol) {
-                    methodBuilder.insertOpCode(MethodBuilder.LDC, ((Symbol) value).getValue());
+                    methodBuilder.insertOpCode(MethodBuilder.LDC, value.toString());
                     methodBuilder.insertOpCode(MAKE_SYM);
                 } else if (value instanceof Integer) {
                     methodBuilder.insertOpCode(MethodBuilder.ICONST, value);
@@ -131,14 +136,14 @@ public class Compiler {
                     throw new RuntimeException("Can't quote " + value);
                 }
                 // update frame
-                frame.current = expr.getNext();
+                frame.current = expr.rest();
                 stack.push(frame);
             }
         }
     }
 
-    Lambda isMacroCall(LinkedList expr) {
-        Object obj = expr.getValue();
+    Lambda isMacroCall(Sequence expr) {
+        Object obj = expr.first();
         if(obj instanceof Symbol) {
             Object resource = Environment.getIfExists((Symbol) obj);
             if(resource instanceof Lambda) {
@@ -154,67 +159,70 @@ public class Compiler {
     Object macroExpand(Object expr) {
         while(true) {
             // macro calls must be linked lists
-            if(!(expr instanceof LinkedList)) {
+            if(!(expr instanceof Sequence)) {
                 return expr;
             }
 
-            Lambda macro = isMacroCall((LinkedList) expr);
+            Lambda macro = isMacroCall((Sequence) expr);
             if (macro == null) {
                 // not a macro call
                 return expr;
             } else {
                 // loop because macros may evaluate to macros
-                expr = macro.invoke(((LinkedList)expr).getNext());
+                expr = macro.invoke(((Sequence)expr).rest());
             }
         }
     }
 
     public void compile(Object ast, ArrayList<Symbol> locals, boolean isTail) {
         ast = macroExpand(ast);
-        if(ast instanceof LinkedList) {
-            LinkedList expr = (LinkedList) ast;
-            Object head = expr.getValue();
-            expr = expr.getNext();
+        if(ast instanceof Sequence) {
+            Sequence expr = (Sequence) ast;
+            Object head = expr.first();
+            expr = expr.rest();
             // switch on head here for special forms:
             // quote, and, or, if/cond, let, lambda, def, defmacro
-            if (QUOTE_SYM.equals(head)) {
+            if (expr.isEmpty()) {
+                // special case of empty list
+                methodBuilder.insertOpCode(EMPTY_LIST);
+                if(isTail)
+                    methodBuilder.insertOpCode(MethodBuilder.ARETURN);
+            } else if (QUOTE_SYM.equals(head)) {
                 // TODO: assert that quote only has 1 argument
-                compileQuote(expr.getValue());
+                compileQuote(expr.first());
                 if(isTail)
                     methodBuilder.insertOpCode(MethodBuilder.ARETURN);
             } else if(DEF_SYM.equals(head)) {
                 // insert into environment
                 // macro expand name?
-                Symbol name = (Symbol)expr.getValue();
+                Symbol name = (Symbol)expr.first();
                 compileQuote(name);
-                compile(LinkedList.second(expr), locals, false);
+                compile(expr.second(), locals, false);
                 // somehow insert into environment
                 // return value
                 methodBuilder.insertOpCode(ENVIR_STORE);
                 if(isTail)
                     methodBuilder.insertOpCode(MethodBuilder.ARETURN);
             } else if (IF_SYM.equals(head)) {
-                if (LinkedList.length(expr) != 3) {
+                if (expr.length() != 3) {
                     throw new SyntaxException("if expects 3 arguments in body: test, then, else.");
                 }
                 // TODO: extend to if-else with arbitrary number of branches
-                // MethodBuilder.JumpLabel elseLab = new MethodBuilder.JumpLabel();
-                // MethodBuilder.JumpLabel endLab = new MethodBuilder.JumpLabel();
-                Symbol elseLab = Lang.gensym("else");
-                Symbol endLab = Lang.gensym("end");
+                Symbol elseLab = Symbol.gensym("else");
+                Symbol endLab = Symbol.gensym("end");
 
                 // TEST
-                compile(LinkedList.first(expr), locals, false);
+                compile(expr.first(), locals, false);
                 methodBuilder.insertOpCode(MethodBuilder.IFNULL, elseLab);
                 // TRUE BRANCH
-                compile(LinkedList.second(expr), locals, isTail);
+                compile(expr.second(), locals, isTail);
                 if(!isTail) {
                     // if tail, the inner expression will return automatically
                     methodBuilder.insertOpCode(MethodBuilder.GOTO, endLab);
                 }
                 // ELSE BRANCH
                 methodBuilder.insertOpCode(MethodBuilder.LABEL, elseLab);
-                compile(LinkedList.third(expr), locals, isTail);
+                compile(expr.third(), locals, isTail);
                 // END
                 if(!isTail) {
                     // if tail, the inner expression will return automatically
@@ -231,9 +239,9 @@ public class Compiler {
                         methodBuilder.insertOpCode(PUSH_TRUE);
                 } else {
                     // MethodBuilder.JumpLabel endLab = new MethodBuilder.JumpLabel();
-                    Symbol endLab = Lang.gensym("end");
-                    while (expr.getNext() != null) {
-                        compile(expr.getValue(), locals, false);
+                    Symbol endLab = Symbol.gensym("end");
+                    while (expr.rest() != null) {
+                        compile(expr.first(), locals, false);
                         methodBuilder.insertOpCode(Keyword.makeKeyword("dup"));
                         if (OR_SYM.equals(head))
                             methodBuilder.insertOpCode(MethodBuilder.IFNONNULL, endLab);
@@ -241,10 +249,10 @@ public class Compiler {
                         else // AND
                             methodBuilder.insertOpCode(MethodBuilder.IFNULL, endLab);
                         methodBuilder.insertOpCode(Keyword.makeKeyword("pop"));
-                        expr = expr.getNext();
+                        expr = expr.rest();
                     }
                     // when result depends on last element
-                    compile(expr.getValue(), locals, false);
+                    compile(expr.first(), locals, false);
                     methodBuilder.insertOpCode(MethodBuilder.LABEL, endLab);
                     if(isTail) {
                         methodBuilder.insertOpCode(MethodBuilder.ARETURN);
@@ -252,13 +260,13 @@ public class Compiler {
                 }
             } else if (LET_SYM.equals(head)) {
                 // TODO: assert that let has 2 arguments
-                LinkedList bindList = (LinkedList) LinkedList.first(expr);
+                Sequence bindList = (Sequence) expr.first();
                 // TODO: assert correct number and type of vars / bindings
                 int localCount = locals.size();
                 // bind locals
-                while (bindList != null) {
+                while(!bindList.isEmpty()) {
                     int localIndex = -1;
-                    Symbol bindSym = (Symbol) bindList.getValue();
+                    Symbol bindSym = (Symbol) bindList.first();
                     // if symbol already exists in this let environment, rebind value
                     for (int i = localCount; i < locals.size(); i++) {
                         if (bindSym.equals(locals.get(i))) {
@@ -271,13 +279,13 @@ public class Compiler {
                         locals.add(bindSym);
                         localIndex = locals.size() - 1;
                     }
-                    compile(bindList.getNext().getValue(), locals, false);
+                    compile(bindList.rest().first(), locals, false);
                     methodBuilder.insertOpCode(MethodBuilder.ASTORE, localIndex);
-                    bindList = bindList.getNext().getNext();
+                    bindList = bindList.rest().rest();
                 }
                 // create a frame indicating new local count
                 methodBuilder.insertOpCode(MethodBuilder.LOCALLABEL, locals.size());
-                Object body = LinkedList.second(expr);
+                Object body = expr.second();
                 compile(body, locals, isTail);
                 // pop locals after body completes
                 locals.subList(localCount, locals.size()).clear();
@@ -288,9 +296,9 @@ public class Compiler {
                 // literal bytecode assembly; inject its values directly
                 // TODO: better de-asm with tree traversal
                 for (Object o : expr) {
-                    if(o instanceof LinkedList && DEASM_SYM.equals(((LinkedList) o).getValue())) {
+                    if(o instanceof Sequence && DEASM_SYM.equals(((Sequence) o).first())) {
                         // deasm cancels out asm and compilation continues normally
-                        Object deasm = ((LinkedList) o).getNext().getValue();
+                        Object deasm = ((Sequence) o).rest().first();
                         // should be asm writer's responsibility to determine when to return
                         compile(deasm, locals, false);
                     } else {
@@ -298,25 +306,24 @@ public class Compiler {
                         methodBuilder.insertOpCode(o);
                     }
                 }
-                // TODO: evaluate whether this is a good idea
-                // perhaps returning should be up to the user?
+                // treating asm like any other expression makes the expression blend in with the language better
+                // making sure that the expression return only one value is up to the programmer
                 if (isTail)
                     methodBuilder.insertOpCode(MethodBuilder.ARETURN);
             } else if(LIST_ASM.equals(head)) {
                 // TODO: out from compiler once varargs are written
-                int length = LinkedList.length(expr);
                 for(Object o : expr) {
                     compile(o, locals, false);
                 }
-                methodBuilder.insertOpCode(MethodBuilder.ACONST_NULL);
-                for(int i = 0; i < length; i ++) {
+
+                methodBuilder.insertOpCode(EMPTY_LIST);
+                for(int i = 0; i < expr.length(); i ++) {
                     methodBuilder.insertOpCode(CONS);
                 }
                 if(isTail)
                     methodBuilder.insertOpCode(MethodBuilder.ARETURN);
             } else {
                 // not a special form; recurse on inner list normally
-
                 // look up head
                 if(!(head instanceof Symbol)) {
                     throw new SyntaxException(head + " can't be used as a function call");
@@ -336,8 +343,9 @@ public class Compiler {
                 }
 
                 if(funcall.isVarargs) {
-                    methodBuilder.insertOpCode(MethodBuilder.ACONST_NULL);
-                    for(int i = funcall.argCount; i < LinkedList.length(expr) + 1; i ++) {
+                    // methodBuilder.insertOpCode(MethodBuilder.ACONST_NULL);
+                    methodBuilder.insertOpCode(EMPTY_LIST);
+                    for(int i = funcall.argCount; i < expr.length() + 1; i ++) {
                         methodBuilder.insertOpCode(CONS);
                     }
                 }
@@ -381,7 +389,7 @@ public class Compiler {
                     methodBuilder.insertOpCode(PUSH_TRUE);
                 } else {
                     // have the class look up the symbol in the environment
-                    methodBuilder.insertOpCode(MethodBuilder.LDC, ((Symbol)ast).getValue());
+                    methodBuilder.insertOpCode(MethodBuilder.LDC, ast.toString());
                     methodBuilder.insertOpCode(MAKE_SYM);
                     methodBuilder.insertOpCode(ENVIR_LOOKUP);
                 }
@@ -404,58 +412,58 @@ public class Compiler {
     }
 
     public Lambda compileMethod(Object ast) {
-        if(!(ast instanceof LinkedList)) {
+        if(!(ast instanceof Sequence)) {
             throw new SyntaxException();
         }
 
-        LinkedList fundef = (LinkedList) ast;
+        Sequence fundef = (Sequence) ast;
         boolean isMacro = false;
-        if(DEFMACRO_SYM.equals(fundef.getValue())) {
+        if(DEFMACRO_SYM.equals(fundef.first())) {
             isMacro = true;
-        } else if(!DEFUN_SYM.equals(fundef.getValue())){
+        } else if(!DEFUN_SYM.equals(fundef.first())){
             throw new SyntaxException("expected function definition");
         }
 
-        fundef = fundef.getNext();
+        fundef = fundef.rest();
         Symbol funName;
-        if(fundef.getValue() instanceof Symbol) {
-            funName = (Symbol) fundef.getValue();
+        if(fundef.first() instanceof Symbol) {
+            funName = (Symbol) fundef.first();
         } else {
             throw new SyntaxException("name of function must be a Sybmol");
         }
 
-        fundef = fundef.getNext();
-        LinkedList params;
-        if(fundef.getValue() == null || fundef.getValue() instanceof LinkedList) {
-            params = (LinkedList) fundef.getValue();
+        fundef = fundef.rest();
+        Sequence params;
+        if(fundef.first() == null || fundef.first() instanceof Sequence) {
+            params = (Sequence) fundef.first();
         } else {
-            throw new SyntaxException("parameter list of function must be a LinkedList");
+            throw new SyntaxException("parameter list of function must be a Sequence");
         }
-        int paramCount = LinkedList.length(params);
+        int paramCount = params.length();
         boolean isVarargs = false;
-        if(paramCount >= 2 && Keyword.makeKeyword("rest").equals(LinkedList.nth(params, paramCount - 2))) {
+        if(paramCount >= 2 && params.nth(paramCount - 2).equals(Keyword.makeKeyword("rest"))) {
             paramCount --;
             isVarargs = true;
             Object[] newParams = new Object[paramCount];
             for(int i = 0; i < paramCount; i ++) {
-                newParams[i] = params.getValue();
-                params = params.getNext();
+                newParams[i] = params.first();
+                params = params.rest();
             }
-            newParams[paramCount - 1] = params.getValue();
+            newParams[paramCount - 1] = params.first();
             params = LinkedList.makeList(newParams);
         }
         methodBuilder = new MethodBuilder(funName, paramCount, isMacro, isVarargs);
 
-        fundef = fundef.getNext();
+        fundef = fundef.rest();
         if(fundef == null) {
             throw new RuntimeException("function can't have an empty body");
         }
-        Object body = fundef.getValue();
+        Object body = fundef.first();
 
         ArrayList<Symbol> locals = new ArrayList<>();
-        while(params != null) {
-            locals.add((Symbol) params.getValue());
-            params = params.getNext();
+        while(!params.isEmpty()) {
+            locals.add((Symbol) params.first());
+            params = params.rest();
         }
 
         compile(body, locals, true);
@@ -465,7 +473,7 @@ public class Compiler {
     public Object compileTopLevel(Object ast) throws VerifyError, InvocationTargetException {
         if(ast instanceof LinkedList) {
             LinkedList astList = (LinkedList) ast;
-            if (DEFUN_SYM.equals(astList.getValue()) || DEFMACRO_SYM.equals(astList.getValue())) {
+            if (DEFUN_SYM.equals(astList.first()) || DEFMACRO_SYM.equals(astList.first())) {
                 return compileMethod(ast);
             }
         }
@@ -492,10 +500,11 @@ public class Compiler {
 
     public static void main(String[] args) throws IOException {
         Compiler compiler = new Compiler();
-        LateralReader lateralReader = LateralReader.fileReader("./src/lisp/test.lisp");
+        LispReader lispReader = LispReader.fileReader("./src/lisp/test.lisp");
 
+        long start = System.currentTimeMillis();
         Object form;
-        while ((form = lateralReader.readForm()) != null) {
+        while ((form = lispReader.readForm()) != null) {
             try {
                 System.out.println(compiler.compileTopLevel(form));
             } catch (Exception e) {
@@ -503,5 +512,7 @@ public class Compiler {
                 return;
             }
         }
+        long delta = System.currentTimeMillis() - start;
+        System.out.println(delta);
     }
 }

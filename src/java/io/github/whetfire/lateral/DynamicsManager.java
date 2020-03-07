@@ -63,13 +63,16 @@ class DynamicsManager {
         classBuilder.addMethod(methodBuilder);
         Class<?> clazz = new ClassDefiner(classBuilder.toBytes()).clazz;
         try {
-            Method method = clazz.getMethod(methodBuilder.getName().getValue(), methodBuilder.getParameterTypes());
+            Method method = clazz.getMethod(methodBuilder.getName().toString(), methodBuilder.getParameterTypes());
             putClass(clazz);
             return method;
         } catch (NoSuchMethodException nsme) {
             // something has gone seriously wrong
             // we just made this class and put the method inside
             throw new RuntimeException("compiler broken?", nsme);
+        } catch (VerifyError ve) {
+            classBuilder.writeToFile(className + ".class");
+            throw ve;
         }
     }
 

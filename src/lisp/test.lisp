@@ -1,26 +1,57 @@
-(defun asdf (a :rest b)
-  (list a b))
+(def LinkedList "io/github/whetfire/lateral/LinkedList")
 
-(asdf 1 2 3 4 5)
+LinkedList
+
+(defun gensym ()
+  (asm (:invokestatic "io/github/whetfire/lateral/Symbol"
+                      "gensym"
+                      "()Lio/github/whetfire/lateral/Symbol;")))
+
+(gensym)
+
+(if :test
+  1
+  2)
+
+;    `test
+
+;(defmacro while (condition body)
+;  (let (looplab (gensym))
+;    `(asm (:goto ,looplab)
+;          (de-asm ,body)
+;          (:label ,looplab)
+;          (de-asm ,condition)
+;          :aconst_null)))
+
+'asdf
+
+'()
+()
+
+null
+
+;(while 1 2)
 
 (defmacro prep (a b)
   (let (LinkedList     "io/github/whetfire/lateral/LinkedList"
+        Sequence       "io/github/whetfire/lateral/Sequence"
         LinkedListType "Lio/github/whetfire/lateral/LinkedList;"
         ObjectType     "Ljava/lang/Object;")
     (list (quote asm)
           (list :new LinkedList)
           :dup
-          a
-          b
-          (list :checkcast LinkedList)
+          (list (quote de-asm) a)
+          (list (quote de-asm) b)
+          (list :checkcast Sequence)
           (list :invokespecial LinkedList "<init>"
-                "(Ljava/lang/Object;Lio/github/whetfire/lateral/LinkedList;)V"))))
+                "(Ljava/lang/Object;Lio/github/whetfire/lateral/Sequence;)V"))))
 
 (defun cons (a b)
   (prep a b))
 
 cons
 
-(cons 1 null)
+(cons 1 '())
 
-asdfsdfajk
+
+

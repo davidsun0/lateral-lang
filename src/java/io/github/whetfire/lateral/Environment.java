@@ -2,7 +2,6 @@ package io.github.whetfire.lateral;
 
 import java.lang.reflect.Method;
 import java.util.HashMap;
-import java.util.Map;
 
 public class Environment {
     private static HashMap<Symbol, Object> symMap = new HashMap<>();

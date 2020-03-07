@@ -14,12 +14,20 @@ public final class Symbol {
         return new Symbol(value);
     }
 
-    @Override
+    static private int gensymCount = -1;
+    public static Symbol gensym() {
+        return gensym("gensym_");
+    }
+
+    public static Symbol gensym(String prefix) {
+        gensymCount ++;
+        return Symbol.makeSymbol(prefix + gensymCount);
+    }
+
     public int hashCode() {
         return value.hashCode();
     }
 
-    @Override
     public boolean equals(Object obj) {
         if(obj == this)
             return true;
@@ -27,11 +35,6 @@ public final class Symbol {
             return obj instanceof Symbol && value.equals(((Symbol) obj).value);
     }
 
-    public String getValue() {
-        return value;
-    }
-
-    @Override
     public String toString() {
         return value;
     }

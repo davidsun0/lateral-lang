@@ -8,29 +8,26 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 
-public class LateralReader {
+// TODO: add line and column metadata to symbols
+public class LispReader {
     private Reader stream;
-    private String token;
-    /*
-    n.b. queue operations are add(), remove(), and peek()
-     */
     private Deque<Character> deque = new ArrayDeque<>();
 
-    public LateralReader(Reader reader) {
+    public LispReader(Reader reader) {
         this.stream = reader;
     }
 
-    public static LateralReader fileReader(String path) throws IOException {
-        return new LateralReader(new BufferedReader(new FileReader(path)));
+    public static LispReader fileReader(String path) throws IOException {
+        return new LispReader(new BufferedReader(new FileReader(path)));
     }
 
     private boolean hasNextChar() throws IOException {
-        if(deque.isEmpty()) {
+        if (deque.isEmpty()) {
             int next = stream.read();
-            if(next == -1)
+            if (next == -1)
                 return false;
             else {
-                deque.addLast((char)next);
+                deque.addLast((char) next);
                 return true;
             }
         } else {
@@ -55,10 +52,6 @@ public class LateralReader {
         } else {
             return deque.peekFirst();
         }
-    }
-
-    private void unread(char c) {
-        deque.addFirst(c);
     }
 
     private void consumeWhitespace() throws IOException {
@@ -97,20 +90,6 @@ public class LateralReader {
         return sb.toString();
     }
 
-    String peekToken() throws IOException {
-        if(token != null)
-            return token;
-        if(!hasNextChar())
-            return null;
-
-        StringBuilder sb = new StringBuilder();
-        while(hasNextChar()) {
-            char c = peekChar();
-
-        }
-        return sb.toString();
-    }
-
     Object readAtom(String value) {
         if(value == null || value.length() == 0) {
             throw new RuntimeException();
@@ -126,11 +105,12 @@ public class LateralReader {
         }
     }
 
-    LinkedList readList() throws IOException {
+    Sequence readList() throws IOException {
         ArrayList<Object> forms = new ArrayList<>();
         Object form;
-        while((form = readForm()) != null) {
-            if(form.equals(')')) {
+        while(hasNextChar()) {
+            form = readForm();
+            if(form != null && form.equals(')')) {
                 // end of list
                 return LinkedList.makeList(forms.toArray());
             } else {
@@ -152,56 +132,42 @@ public class LateralReader {
         } else if(c == '"') {
             return consumeString();
         } else if(c == '\'') {
-            LinkedList val = new LinkedList(readForm(), null);
+            LinkedList val = new LinkedList(readForm());
             return new LinkedList(Symbol.makeSymbol("quote"), val);
         } else if(c == '`') {
-            LinkedList val = new LinkedList(readForm(), null);
+            LinkedList val = new LinkedList(readForm());
             return new LinkedList(Symbol.makeSymbol("quasiquote"), val);
-        } else if(c == ',') {
-            LinkedList val = new LinkedList(readForm(), null);
-            return new LinkedList(Symbol.makeSymbol("unquote"), val);
         }
         // reader macros here
 
-        unread(c);
-        if(hasNextChar()) {
-            c = nextChar();
-            if(c == '(') {
-                return readList();
-            } else if(c == ')') {
-                return ')';
-            }
-
-            StringBuilder sb = new StringBuilder();
-            unread(c);
-            read:
-            while(hasNextChar()) {
-                c = peekChar();
-                switch (c) {
-                    case '(':
-                    case ')':
-                    case ' ':
-                    case '\n':
-                    case '\t':
-                        break read;
-                    default:
-                        sb.append(c);
-                        nextChar();
-                        break;
-                }
-            }
-            //return Symbol.makeSymbol(sb.toString());
-            //
-            //
-            // return sb.toString();
-            return readAtom(sb.toString());
-        } else {
-            return null;
+        else if(c == '(') {
+            return readList();
+        } else if(c == ')') {
+            return ')';
         }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(c);
+        read:
+        while(hasNextChar()) {
+            c = peekChar();
+            switch (c) {
+                case '(':
+                case ')':
+                case ' ':
+                case '\n':
+                    break read;
+                default:
+                    sb.append(c);
+                    nextChar();
+                    break;
+            }
+        }
+        return readAtom(sb.toString());
     }
 
     public static void main(String[] args) throws IOException {
-        LateralReader reader = fileReader("./src/lisp/test.lisp");
+        LispReader reader = fileReader("./src/lisp/test.lisp");
         Object form;
         while((form = reader.readForm()) != null) {
             System.out.println(form);

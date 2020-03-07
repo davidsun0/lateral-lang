@@ -7,8 +7,7 @@ public class Lambda {
     private Method method;
     final boolean isMacro, isVarargs;
     final int argCount;
-    LinkedList invoker;
-
+    Sequence invoker;
 
     /**
      * Creates a String with the JVM internal representation of a method
@@ -48,7 +47,7 @@ public class Lambda {
         invoker = makeInvoker();
     }
 
-    private LinkedList makeInvoker() {
+    private Sequence makeInvoker() {
         return LinkedList.makeList(
                 MethodBuilder.INVOKESTATIC,
                 method.getDeclaringClass().getName().replace('.', '/'),
@@ -57,7 +56,7 @@ public class Lambda {
         );
     }
 
-    LinkedList getInvoker() {
+    Sequence getInvoker() {
         return invoker;
     }
 
@@ -69,15 +68,15 @@ public class Lambda {
         return 'L' + clazz.getName().replace('.', '/') + ';';
     }
 
-    Object invoke(LinkedList argVals) {
+    Object invoke(Sequence argVals) {
         Class<?>[] params = method.getParameterTypes();
         Object[] args = new Object[params.length];
         // TODO: check arg counts
         for(int i = 0; i < params.length; i ++) {
-            args[i] = argVals.getValue();
+            args[i] = argVals.first();
             // TODO: type checking
             // params[i].isInstance(args[i])
-            argVals = argVals.getNext();
+            argVals = argVals.rest();
         }
         try {
             return method.invoke(null, args);
