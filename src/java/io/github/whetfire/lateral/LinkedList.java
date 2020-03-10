@@ -1,8 +1,12 @@
 package io.github.whetfire.lateral;
 
+/**
+ * Simple linked list implementation of Sequence
+ */
+
 public class LinkedList extends Sequence {
-    private final Object value;
-    private final Sequence next;
+    private Object value;
+    private Sequence next;
 
     public LinkedList(Object value) {
         this(value, EmptySequence.EMPTY_SEQUENCE);

@@ -1,8 +1,6 @@
 package io.github.whetfire.lateral;
 
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
+import java.util.*;
 
 import io.github.whetfire.lateral.ConstantPool.ConstantEntry;
 
@@ -20,6 +18,7 @@ public class MethodBuilder {
     static Keyword LOCALLABEL = Keyword.makeKeyword("locallabel");
     static Keyword IFNULL = Keyword.makeKeyword("ifnull");
     static Keyword IFNONNULL = Keyword.makeKeyword("ifnonnull");
+    static Keyword IFEQ = Keyword.makeKeyword("ifeq");
     static Keyword GOTO = Keyword.makeKeyword("goto");
 
     static Keyword LDC = Keyword.makeKeyword("ldc");
@@ -46,6 +45,7 @@ public class MethodBuilder {
         simpleCodes.put(ARETURN, (-1 << 8) | 0xB0);
         simpleCodes.put(Keyword.makeKeyword("pop"), (-1 << 8) | 0x57);
         simpleCodes.put(Keyword.makeKeyword("dup"), (1 << 8) | 0x59);
+        simpleCodes.put(Keyword.makeKeyword("dup2"), (2 << 8) | 0x5C);
     }
 
     static void asmError(Object op) {
@@ -60,21 +60,21 @@ public class MethodBuilder {
         boolean inClass = false;
         // JVM field descriptors
         // https://docs.oracle.com/javase/specs/jvms/se11/html/jvms-4.html#jvms-4.3.2
-        while(')' != (c = internalName.charAt(idx))) {
-            if(!inClass) {
+        while (')' != (c = internalName.charAt(idx))) {
+            if (!inClass) {
                 switch (c) {
                     // TODO: handle double and long (they need two arg slots)
                     case 'L': // start of a class
                         inClass = true;
                     case 'B': // byte
                     case 'C': // char
-                    // case 'D': // double
+                        // case 'D': // double
                     case 'F': // float
                     case 'I': // int
-                    // case 'J': // long
+                        // case 'J': // long
                     case 'S': // short
                     case 'Z': // bool
-                        count ++;
+                        count++;
                     case '[':
                         // each '[' only adds dimension, doesn't change arg counts
                         break;
@@ -82,10 +82,10 @@ public class MethodBuilder {
                         // error?
                         throw new RuntimeException();
                 }
-            } else if(c == ';'){
+            } else if (c == ';') {
                 inClass = false;
             }
-            idx ++;
+            idx++;
         }
         return count;
     }
@@ -107,7 +107,7 @@ public class MethodBuilder {
         }
 
         public boolean equals(Object obj) {
-            if(obj == this) {
+            if (obj == this) {
                 return true;
             } else {
                 return (obj instanceof StackMapFrame &&
@@ -138,7 +138,7 @@ public class MethodBuilder {
         this(name, paramCount, false, false);
     }
 
-    MethodBuilder(Symbol name, int paramCount, boolean isMacro, boolean isVarargs){
+    MethodBuilder(Symbol name, int paramCount, boolean isMacro, boolean isVarargs) {
         this.name = name;
         this.paramCount = paramCount;
         this.isMacro = isMacro;
@@ -155,27 +155,191 @@ public class MethodBuilder {
 
     public Class<?>[] getParameterTypes() {
         Class<?>[] params = new Class<?>[paramCount];
-        for(int i = 0; i < paramCount; i ++) {
+        for (int i = 0; i < paramCount; i++) {
             params[i] = Object.class;
         }
         return params;
     }
 
-    public void insertOpCode(Object ... codes) {
-        if(codes.length == 1) {
+    public void insertOpCode(Object... codes) {
+        if (codes.length == 1) {
             this.codes.add(codes[0]);
         } else {
-            this.codes.add(LinkedList.makeList(codes));
+            this.codes.add(new ArraySequence(codes));
         }
     }
 
     public void printCodes() {
-        for(Object code : codes) {
+        for (Object code : codes) {
             System.out.println(code);
         }
     }
 
+    static class SearchFrame {
+        int index;
+        Class<?>[] stack;
+
+        SearchFrame(int index, Class<?>[] stack) {
+            this.index = index;
+            this.stack = stack;
+        }
+    }
+
+    static String[] splitTypeString(String internalType) {
+        ArrayList<String> strings = new ArrayList<>();
+        int index = 0;
+        while(index < internalType.length()) {
+            switch (internalType.charAt(index)) {
+                case 'L':
+                    String className = internalType.substring(index, internalType.indexOf(';', index) + 1);
+                    strings.add(className);
+                    index = internalType.indexOf(';', index) + 1;
+                    break;
+
+                case 'B': // byte
+                case 'C': // char
+                    // case 'D': // double
+                case 'F': // float
+                case 'I': // int
+                    // case 'J': // long
+                case 'S': // short
+                case 'V': // void
+                case 'Z': // bool
+                    strings.add(Character.toString(internalType.charAt(index)));
+                    // TODO: handle arrays
+                case '(':
+                case ')':
+                    index ++;
+                    break;
+                default:
+                    asmError(internalType);
+            }
+        }
+        return strings.toArray(new String[0]);
+    }
+
+    static Class<?> fromTypeString(String type) throws ClassNotFoundException{
+        if(type.charAt(0) == 'L') {
+            // "Ljava/lang/Object;" -> "java.lang.Object"
+            return Class.forName(type.substring(1, type.length() - 1).replace('/', '.'));
+        } else if("I".equals(type)) {
+            return int.class;
+        } else {
+            throw new RuntimeException();
+        }
+    }
+
+    static Class<?>[] methodTypes(String internalType) {
+        String[] typeStrings = splitTypeString(internalType);
+        Class<?>[] classes = new Class[typeStrings.length];
+        for(int i = 0; i < classes.length; i ++) {
+            try {
+                classes[i] = fromTypeString(typeStrings[i]);
+            } catch (ClassNotFoundException e) {
+                // if class isn't defined (yet?), use Object
+                // maybe this causes issues with linking
+                // classes[i] = Object.class;
+                throw new RuntimeException(e);
+            }
+        }
+        return classes;
+    }
+
+    void preprocess() {
+        // scan for gotos, labels, and conditional jumps
+        HashMap<Symbol, Integer> labelMap = new HashMap<>();
+        for(int i = 0; i < codes.size(); i ++) {
+            Object o = codes.get(i);
+            if(o instanceof Sequence && ((Sequence) o).first().equals(LABEL)) {
+                // why I don't like static typing, exhibit A
+                labelMap.put((Symbol) ((Sequence) o).second(), i);
+            }
+        }
+        if(labelMap.isEmpty()) {
+            return;
+        }
+
+        ArrayDeque<SearchFrame> searchStack = new ArrayDeque<>();
+        ArrayDeque<Class<?>> virtualStack = new ArrayDeque<>();
+        HashMap<Symbol, Class<?>[]> labelFrames = new HashMap<>();
+        for(int i = 0; i < paramCount; i ++) {
+            virtualStack.addFirst(Object.class);
+        }
+        searchStack.addFirst(new SearchFrame(0, virtualStack.toArray(new Class[0])));
+        while(!searchStack.isEmpty()) {
+            SearchFrame frame = searchStack.removeFirst();
+            int index = frame.index;
+            // set the virtual stack
+            virtualStack = new ArrayDeque<>(Arrays.asList(frame.stack));
+            while(index <= codes.size()) {
+                Object op = codes.get(index);
+                if(op instanceof Sequence) {
+                    Object head = ((Sequence) op).first();
+                    if (INVOKESTATIC.equals(head)) {
+                        Class<?>[] methodTypes = methodTypes((String) ((Sequence) op).fourth());
+                        // assert that the objects on the stack match the types the call expects
+                        // last in method types is the return type
+                        for (int i = methodTypes.length - 2; i >= 0; i--) {
+                            Class<?> onStack = virtualStack.removeFirst();
+                            if (!methodTypes[i].isAssignableFrom(onStack)) {
+                                throw new RuntimeException("can't assign types on stack");
+                            }
+                        }
+                        // and put the return type on the stack
+                        virtualStack.addFirst(methodTypes[methodTypes.length - 1]);
+                    } else if(GETSTATIC.equals(head)) {
+                        try {
+                            Class clazz = fromTypeString((String) ((Sequence) op).fourth());
+                            virtualStack.addFirst(clazz);
+                        } catch (ClassNotFoundException e) {
+                            throw new RuntimeException(e);
+                        }
+                    } else if (LABEL.equals(head)) {
+                        Symbol label = (Symbol) ((Sequence) op).second();
+                        if(labelFrames.containsKey(label)) {
+                            // TODO: confirm current stack matches existing stack
+                        } else {
+                            labelFrames.put(label, virtualStack.toArray(new Class<?>[0]));
+                        }
+                    } else if (GOTO.equals(head)) {
+                        // control flow must jump to target
+                        index = labelMap.get((Symbol) ((Sequence) op).second());
+                        // make stack map frame here
+                        // asmError(GOTO);
+                        continue;
+                    } else if (IFNULL.equals(head)) {
+                        // consume a value for the condition
+                        // that it is a object reference? class.isPrimitive()
+                        virtualStack.removeFirst();
+                        int branchTarget = labelMap.get((Symbol) ((Sequence) op).second());
+                        // make stack map frame here
+                        searchStack.push(new SearchFrame(branchTarget, Utils.toClassArray(virtualStack.toArray())));
+                    } else if (LDC.equals(head)) {
+                        if (((Sequence) op).second() instanceof String) {
+                            virtualStack.addFirst(String.class);
+                        } else {
+                            asmError(op);
+                        }
+                    } else if (ICONST.equals(head)) {
+                        virtualStack.addFirst(int.class);
+                    } else {
+                        asmError(op);
+                    }
+                } else if(ARETURN.equals(op)) {
+                    // TODO: other returns, throw
+                    break;
+                } else {
+                    asmError(op);
+                }
+                index ++;
+            }
+        }
+        // traverse graph calculating jump table values
+        System.out.println("===");
+    }
+
     public byte[] assembleMethod(ClassBuilder builder) {
+        preprocess();
         ConstantPool pool = builder.pool;
         ArrayList<Byte> bytes = new ArrayList<>();
         // u2 accessor flags
@@ -186,7 +350,7 @@ public class MethodBuilder {
         Utils.putShort(bytes, x);
         // u2 descriptor index (utf8)
         // TODO: generate descriptor index
-        x = pool.put(new ConstantPool.UTF8Info(Lambda.makeMethodSignature(paramCount)));
+        x = pool.put(new ConstantPool.UTF8Info(Compiler.makeMethodSignature(paramCount)));
         Utils.putShort(bytes, x);
         // u2 number of attributes
         // TODO: generate attributes
@@ -196,7 +360,6 @@ public class MethodBuilder {
         Utils.putShort(bytes, attributeCount);
 
         // CODE ATTRIBUTE
-        // MethodBuilder assembler = new MethodBuilder(paramCount);
         byte[] byteCodes = assembleCode(builder);
         byte[] stackMapTable = makeStackMapTable(builder);
         Utils.putShort(bytes, pool.put(ConstantPool.CODE_NAME));
@@ -241,6 +404,7 @@ public class MethodBuilder {
         Utils.putShort(bytes, annotationCount);
 
         if(isMacro) {
+            // TODO: convert class string literal
             x = builder.pool.put(new ConstantPool.UTF8Info("Lio/github/whetfire/lateral/Macro;"));
             Utils.putShort(bytes, x);
             // no values held by varargs annotation
@@ -248,6 +412,7 @@ public class MethodBuilder {
         }
 
         if(isVarargs) {
+            // TODO: convert class string literal
             // varargs annotation
             x = builder.pool.put(new ConstantPool.UTF8Info("Lio/github/whetfire/lateral/Varargs;"));
             Utils.putShort(bytes, x);
@@ -277,18 +442,22 @@ public class MethodBuilder {
         if(LABEL.equals(kop)) {
             // store label
             Symbol targetSym = (Symbol) compOp.second();
-            StackMapFrame target = jumpMap.get(targetSym);
-            if(target == null || target.stackHeight < 0)
-                asmError("backwards jump");
-            stackHeight = target.stackHeight;
-
-            target.localCount = localCount;
-            target.byteCodePosition = bytecount;
-            stackMapTable.add(target);
+            if(!jumpMap.containsKey(targetSym)) {
+                // backwards jump; we haven't seen the jump yet
+                // insert the stack frame because it doesn't exist yet
+                jumpMap.put(targetSym, new StackMapFrame(stackHeight, localCount, bytecount));
+            } else {
+                // forwards jump; we've seen the jump associated with this label before
+                StackMapFrame target = jumpMap.get(targetSym);
+                stackHeight = target.stackHeight;
+                target.localCount = localCount;
+                target.byteCodePosition = bytecount;
+                stackMapTable.add(target);
+            }
         } else if(LOCALLABEL.equals(kop)) {
             localCount = (Integer) compOp.second();
             stackMapTable.add(new StackMapFrame(stackHeight, localCount, bytecount));
-        } else if(GOTO.equals(kop) || IFNONNULL.equals(kop) || IFNULL.equals(kop)) {
+        } else if(GOTO.equals(kop) || IFNONNULL.equals(kop) || IFNULL.equals(kop) || IFEQ.equals(kop)) {
             // defer assembling jumps to second pass
             byteops.add(compOp);
             bytecount += 3;
@@ -297,39 +466,36 @@ public class MethodBuilder {
                 stackHeight --;
             }
             // set stack height at jump target
-
             Symbol targetSym = (Symbol) compOp.second();
-            StackMapFrame target = new StackMapFrame(stackHeight, -1, -1);
-            jumpMap.put(targetSym, target);
-            // asmError(compOp);
-        } else if(ALOAD.equals(kop)) {
+            // System.out.println(jumpMap.containsKey(targetSym));
+            if(jumpMap.containsKey(targetSym)) {
+                // asmError("backwards jump");
+                // don't do anything?
+                StackMapFrame target = jumpMap.get(targetSym);
+                target.stackHeight = stackHeight;
+                target.localCount = localCount;
+                // if(stackHeight != target.stackHeight || localCount < target.localCount)
+                //    asmError("mismatched jump");
+            } else {
+                StackMapFrame target = new StackMapFrame(stackHeight, -1, -1);
+                jumpMap.put(targetSym, target);
+            }
+        } else if(ALOAD.equals(kop) || ASTORE.equals(kop)) {
+            // all astore opcodes are exactly 0x21 more than aload
+            byte opcode = ALOAD.equals(kop) ? 0 : (byte) 0x21;
             int idx = (Integer) compOp.second();
             if (idx < 4) {
                 // specific codes for aload_0 to aload_4
-                byteops.add((byte) (0x2A + idx));
+                byteops.add((byte) (opcode + 0x2A + idx));
                 bytecount ++;
             } else {
                 // general aload
-                byteops.add((byte) 0x19);
+                byteops.add((byte) (opcode + 0x19));
                 byteops.add((byte) idx);
                 bytecount += 2;
             }
-            stackHeight++;
-        } else if(ASTORE.equals(kop)) {
-            // all astore opcodes are exactly 0x21 more than aload
-            // but it's probably better to leave them separate for readability
-            int idx = (Integer) compOp.second();
-            if(idx < 4) {
-                // specific codes for astore_0 to astore_4
-                byteops.add((byte) (0x4B + idx));
-                bytecount ++;
-            } else {
-                // general astore
-                byteops.add((byte) 0x3A);
-                byteops.add((byte) idx);
-                bytecount += 2;
-            }
-            stackHeight --;
+            // aload increases stack height, astore decreases
+            stackHeight += opcode == 0 ? 1 : -1;
         } else if(LDC.equals(kop)) {
             Object robj = compOp.second();
             ConstantEntry resource = null;
@@ -365,47 +531,13 @@ public class MethodBuilder {
             byteops.add((byte) (x & 0xFF));
             bytecount += 3;
             stackHeight++;
-        } else if(INVOKESTATIC.equals(kop)) {
-            // TODO: merge all the invokes together (except for invokedynamic?)
-            byteops.add((byte) 0xB8);
-            String methodType = (String) compOp.fourth();
-            ConstantPool.MethodRefInfo methodRefInfo = new ConstantPool.MethodRefInfo(
-                    (String) compOp.second(),
-                    (String) compOp.third(),
-                    methodType
-            );
-            short x = builder.pool.put(methodRefInfo);
-            byteops.add((byte) ((x >> 8) & 0xFF));
-            byteops.add((byte) (x & 0xFF));
-            bytecount += 3;
-            // TODO: generate stack height in a better way
-            // to find the new stack height, subtract number of arguments
-            stackHeight -= countArguments(methodType);
-            // add the returned object to the stack (if it isn't void)
-            if (methodType.charAt(methodType.length() - 1) != 'V')
-                stackHeight++;
-        } else if(INVOKESPECIAL.equals(kop)) {
-            // same as invokestatic
-            byteops.add((byte) 0xB7);
-            String methodType = (String) compOp.fourth();
-            ConstantPool.MethodRefInfo methodRefInfo = new ConstantPool.MethodRefInfo(
-                    (String) compOp.second(),
-                    (String) compOp.third(),
-                    methodType
-            );
-            short x = builder.pool.put(methodRefInfo);
-            byteops.add((byte) ((x >> 8) & 0xFF));
-            byteops.add((byte) (x & 0xFF));
-            bytecount += 3;
-            // TODO: generate stack height in a better way
-            // to find the new stack height, subtract number of arguments
-            stackHeight -= countArguments(methodType);
-            // add the returned object to the stack (if it isn't void)
-            if (methodType.charAt(methodType.length() - 1) != 'V')
-                stackHeight++;
-        } else if(INVOKEVIRTUAL.equals(kop)) {
-            // same as invokestatic
-            byteops.add((byte) 0xB6);
+        } else if(INVOKEVIRTUAL.equals(kop) || INVOKESPECIAL.equals(kop) || INVOKESTATIC.equals(kop)) {
+            if(INVOKEVIRTUAL.equals(kop))
+                byteops.add((byte) 0xB6);
+            else if(INVOKESPECIAL.equals(kop))
+                byteops.add((byte) 0xB7);
+            else // INVOKESTATIC
+                byteops.add((byte) 0xB8);
             String methodType = (String) compOp.fourth();
             ConstantPool.MethodRefInfo methodRefInfo = new ConstantPool.MethodRefInfo(
                     (String) compOp.second(),
@@ -502,7 +634,11 @@ public class MethodBuilder {
                 } else if (IFNULL.equals(optype)) {
                     bytes.add((byte)0xC6);
                 } else if (GOTO.equals(optype)) {
-                    bytes.add((byte)0xA7);
+                    bytes.add((byte) 0xA7);
+                } else if (IFEQ.equals(optype)) {
+                    bytes.add((byte) 0x99);
+                } else {
+                    asmError(optype);
                 }
                 bytes.add((byte)((offset >> 8) & 0xFF));
                 bytes.add((byte)(offset & 0xFF));

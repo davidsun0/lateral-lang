@@ -11,6 +11,14 @@ public class Utils {
         return result;
     }
 
+    public static Class<?>[] toClassArray(Object[] classes) {
+        Class<?>[] result = new Class<?>[classes.length];
+        for(int i = 0; i < classes.length; i ++) {
+            result[i] = (Class<?>) classes[i];
+        }
+        return result;
+    }
+
     public static ArrayList<Byte> appendBytes(ArrayList<Byte> target, byte[] source) {
         for(byte b : source) {
             target.add(b);

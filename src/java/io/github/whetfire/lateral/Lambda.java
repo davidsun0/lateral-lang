@@ -9,36 +9,6 @@ public class Lambda {
     final int argCount;
     Sequence invoker;
 
-    /**
-     * Creates a String with the JVM internal representation of a method
-     * @param method source method
-     * @return JVM internal style string reference to method
-     */
-    public static String internalMethodType(Method method) {
-        // TODO: extend to primitive types
-        StringBuilder sb = new StringBuilder();
-        sb.append('(');
-        for(Class clazz : method.getParameterTypes()) {
-            sb.append('L');
-            sb.append(clazz.getName());
-            sb.append(';');
-        }
-        sb.append(")L");
-        sb.append(method.getReturnType().getName());
-        sb.append(";");
-        return sb.toString().replace('.', '/');
-    }
-
-    public static String makeMethodSignature(int argCount) {
-        StringBuilder sb = new StringBuilder();
-        sb.append('(');
-        for (int i = 0; i < argCount; i++) {
-            sb.append("Ljava/lang/Object;");
-        }
-        sb.append(")Ljava/lang/Object;");
-        return sb.toString();
-    }
-
     Lambda(Method method) {
         this.method = method;
         isMacro = method.isAnnotationPresent(Macro.class);
@@ -48,11 +18,11 @@ public class Lambda {
     }
 
     private Sequence makeInvoker() {
-        return LinkedList.makeList(
+        return new ArraySequence(
                 MethodBuilder.INVOKESTATIC,
-                method.getDeclaringClass().getName().replace('.', '/'),
+                Compiler.internalClassName(method.getDeclaringClass()),
                 method.getName(),
-                internalMethodType(method)
+                Compiler.internalMethodType(method)
         );
     }
 
@@ -62,10 +32,6 @@ public class Lambda {
 
     boolean isMacro() {
         return isMacro;
-    }
-
-    public static String internalClassName(Class clazz) {
-        return 'L' + clazz.getName().replace('.', '/') + ';';
     }
 
     Object invoke(Sequence argVals) {

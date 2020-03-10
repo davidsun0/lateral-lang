@@ -1,7 +1,3 @@
-(def LinkedList "io/github/whetfire/lateral/LinkedList")
-
-LinkedList
-
 (defun gensym ()
   (asm (:invokestatic "io/github/whetfire/lateral/Symbol"
                       "gensym"
@@ -14,39 +10,48 @@ LinkedList
                       "concat"
                       "(Lio/github/whetfire/lateral/Sequence;)Lio/github/whetfire/lateral/Sequence;")))
 
-(concat (list 1 2) (list 3 4))
-
-(gensym)
-
-`test
-
-;`(a b ,c ,@(d e f) g)
-
-(let (x 0)
-  ``,,x)
-
 (defmacro while (condition body)
-  (let (looplab (gensym))
-    `(asm (:goto ,looplab)
-          (de-asm ,body)
-          (:label ,looplab)
-          (de-asm ,condition)
+  (let (looplab  (gensym)
+        startlab (gensym))
+    `(asm (:goto      ,looplab)
+          (:label     ,startlab)
+          (de-asm     ,body)
+          (:label     ,looplab)
+          (de-asm     ,condition)
+          (:ifnonnull ,startlab)
           :aconst_null)))
 
 (defmacro asm-if (condition then else)
   (let (elselab (gensym)
         endlab  (gensym))
-    `(asm (de-asm ,condition)
+    `(asm (de-asm  ,condition)
           (:ifnull ,elselab)
-          (de-asm ,then)
-          (:goto ,endlab)
-          (:label ,elselab)
-          (de-asm ,else)
-          (:label ,endlab))))
+          (de-asm  ,then)
+          (:goto   ,endlab)
+          (:label  ,elselab)
+          (de-asm  ,else)
+          (:label  ,endlab))))
 
-(asm-if null
-  (list 1 2)
-  (list 3 4))
+(defun str-concat (:rest st)
+  (asm (:new "java/lang/StringBuilder")
+       :dup
+       (:invokespecial "java/lang/StringBuilder" "<init>" "()V")
+       (de-asm st)
+       (:goto cond)
+       (:label loop)
+       :dup2
+       (:invokevirtual "io/github/whetfire/lateral/Sequence" "first"
+                       "()Ljava/lang/Object;")
+       (:invokevirtual "Object" "toString" "()Ljava/lang/String;")
+       (:invokevirtual "StringBuilder" "append"
+                       "(Ljava/lang/String;)Ljava/lang/StringBuilder;")
+       :pop
+       (:label cond)
+       :dup
+       (:invokevirtual "Sequence" "isEmpty" "()Z")
+       (:ifeq loop)
+       :pop
+       (:invokevirtual "Object" "toString" "()Ljava/lang/String;")))
 
 (defmacro prep (a b)
   `(asm (de-asm ,b)
@@ -56,12 +61,7 @@ LinkedList
                         "cons"
                         "(Ljava/lang/Object;)Lio/github/whetfire/lateral/Sequence;")))
 
-(defun cons (a b)
-  (prep a b))
-
-(list cons gensym)
-
-(cons 2 (cons 1 '()))
-
-
-
+(list (gensym) (gensym))
+(asm-if null
+  (list 1 2)
+  '())

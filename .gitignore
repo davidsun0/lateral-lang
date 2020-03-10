@@ -4,3 +4,7 @@ out/
 
 # Java
 *.class
+
+# vim, hidden files
+.*
+!.gitignore

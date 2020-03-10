@@ -73,7 +73,7 @@ public abstract class Sequence implements Iterable<Object> {
             }
             seqs = seqs.rest();
         }
-        return LinkedList.makeList(forms.toArray());
+        return new ArraySequence(forms.toArray());
     }
 
     public final Iterator<Object> iterator() {

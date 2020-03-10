@@ -76,6 +76,17 @@ class DynamicsManager {
         }
     }
 
+    public Method putMethod(byte[] classBytes, String name, Class<?>[] signature) {
+        Class<?> clazz = new ClassDefiner(classBytes).clazz;
+        try {
+            Method method = clazz.getMethod(name, signature);
+            putClass(clazz);
+            return method;
+        } catch (NoSuchMethodException nsme) {
+            throw new RuntimeException(nsme);
+        }
+    }
+
     /**
      * Defines a temporary class. Useful for making classes that will only be used once.
      * DynamicsManager does not store the generated class or its containing ClassLoader,

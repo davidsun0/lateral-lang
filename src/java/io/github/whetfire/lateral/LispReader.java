@@ -119,7 +119,7 @@ public class LispReader {
             form = readForm();
             if(form != null && form.equals(')')) {
                 // end of list
-                return LinkedList.makeList(forms.toArray());
+                return ArraySequence.makeList(forms.toArray());
             } else {
                 forms.add(form);
             }
@@ -183,6 +183,12 @@ public class LispReader {
         return readAtom(sb.toString());
     }
 
+    /**
+     * Ahh, the glorious quasiquote, the crown jewel of programs that write programs.
+     * I have a truly marvelous explanation of quasiquote which cannot fit in this doc comment.
+     * @param list The body of the quasiquoted expression
+     * @return An expanded representation of list
+     */
     private Sequence quasiQuoteHelper(Sequence list) {
         ArrayList<Object> forms = new ArrayList<>();
         forms.add(CONCAT);
@@ -210,7 +216,7 @@ public class LispReader {
             }
             list = list.rest();
         }
-        return LinkedList.makeList(forms.toArray());
+        return new ArraySequence(forms.toArray());
     }
 
     private Object readQuasiQuote() throws IOException {
@@ -222,6 +228,8 @@ public class LispReader {
             if(seqBody.first().equals(UNQUOTE)) {
                 // TODO: not sure if this is in the right place
                 return seqBody.second();
+            } else if(seqBody.first().equals(UNQUOTE_SPLICING)) {
+                throw new RuntimeException("pretty sure quasiquote - unquote splicing is illegal");
             } else {
                 return quasiQuoteHelper((Sequence) quoteBody);
             }

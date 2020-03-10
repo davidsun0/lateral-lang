@@ -6,43 +6,49 @@ import java.lang.reflect.Method;
 import java.util.*;
 
 public class Compiler {
-    static Sequence PUSH_TRUE = LinkedList.makeList(
-            Keyword.makeKeyword("getstatic"),
-            "java/lang/Boolean", "TRUE", "Ljava/lang/Boolean;"
-    );
-    static Sequence EMPTY_LIST = LinkedList.makeList(
-            Keyword.makeKeyword("getstatic"),
-            "io/github/whetfire/lateral/EmptySequence", "EMPTY_SEQUENCE",
-            "Lio/github/whetfire/lateral/Sequence;"
+
+    // TODO: convert class string literal
+    static Sequence PUSH_TRUE = new ArraySequence(
+            MethodBuilder.GETSTATIC, internalClassName(Boolean.class),
+            "TRUE", internalClassType(Boolean.class)
     );
 
-    static Sequence PARSE_INT = LinkedList.makeList(
-            Keyword.makeKeyword("invokestatic"),
-            "java/lang/Integer", "valueOf", "(I)Ljava/lang/Integer;"
-    );
-    static Sequence MAKE_SYM = LinkedList.makeList(
-            Keyword.makeKeyword("invokestatic"),
-            "io/github/whetfire/lateral/Symbol", "makeSymbol",
-            "(Ljava/lang/String;)Lio/github/whetfire/lateral/Symbol;"
-    );
-    static Sequence MAKE_KEY = LinkedList.makeList(
-            Keyword.makeKeyword("invokestatic"),
-            "io/github/whetfire/lateral/Keyword", "makeKeyword",
-            "(Ljava/lang/String;)Lio/github/whetfire/lateral/Keyword;"
+    static Sequence EMPTY_LIST = new ArraySequence(
+            MethodBuilder.GETSTATIC, internalClassName(EmptySequence.class),
+            "EMPTY_SEQUENCE", internalClassType(Sequence.class)
     );
 
-    static Sequence ENVIR_LOOKUP = LinkedList.makeList(
-            Keyword.makeKeyword("invokestatic"),
-            "io/github/whetfire/lateral/Environment", "get",
-            "(Lio/github/whetfire/lateral/Symbol;)Ljava/lang/Object;"
-    );
-    static Sequence ENVIR_STORE = LinkedList.makeList(
-            Keyword.makeKeyword("invokestatic"),
-            "io/github/whetfire/lateral/Environment", "insert",
-            "(Lio/github/whetfire/lateral/Symbol;Ljava/lang/Object;)Ljava/lang/Object;"
+    static Sequence PARSE_INT = new ArraySequence(
+            MethodBuilder.INVOKESTATIC, internalClassName(Integer.class),
+            "valueOf", internalMethodType(int.class, Integer.class)
     );
 
-    static Sequence CONS;
+    static Sequence MAKE_SYM = new ArraySequence(
+            MethodBuilder.INVOKESTATIC, internalClassName(Symbol.class),
+            "makeSymbol", internalMethodType(String.class, Symbol.class)
+    );
+
+    static Sequence MAKE_KEY = new ArraySequence(
+            MethodBuilder.INVOKESTATIC, internalClassName(Keyword.class),
+            "makeKeyword", internalMethodType(String.class, Keyword.class)
+    );
+
+    static Sequence ENVIR_LOOKUP = new ArraySequence(
+            MethodBuilder.INVOKESTATIC, internalClassName(Environment.class),
+            "get", internalMethodType(Symbol.class, Object.class)
+    );
+
+    static Sequence ENVIR_STORE = new ArraySequence(
+            MethodBuilder.INVOKESTATIC, internalClassName(Environment.class),
+            "insert", internalMethodType(Symbol.class, Object.class, Object.class)
+    );
+
+    static Sequence CONS = new ArraySequence(
+            MethodBuilder.INVOKESTATIC, internalClassName(Sequence.class),
+            "cons", internalMethodType(Object.class, Sequence.class, Sequence.class)
+    );
+
+
     static Symbol QUOTE_SYM = Symbol.makeSymbol("quote");
 
     static Symbol IF_SYM = Symbol.makeSymbol("if");
@@ -58,11 +64,57 @@ public class Compiler {
     static Symbol DEASM_SYM = Symbol.makeSymbol("de-asm");
     static Symbol LIST_ASM = Symbol.makeSymbol("list");
 
-    static {
-        CONS = LinkedList.makeList(MethodBuilder.INVOKESTATIC,
-                "io/github/whetfire/lateral/Sequence", "cons",
-                "(Ljava/lang/Object;Lio/github/whetfire/lateral/Sequence;)Lio/github/whetfire/lateral/Sequence;"
-        );
+    /**
+     * Creates a String with the JVM internal representation of a method
+     * @param method source method
+     * @return JVM internal style string reference to method
+     */
+    public static String internalMethodType(Method method) {
+        // TODO: extend to primitive types
+        StringBuilder sb = new StringBuilder();
+        sb.append('(');
+        for(Class clazz : method.getParameterTypes()) {
+            sb.append('L');
+            sb.append(clazz.getName());
+            sb.append(';');
+        }
+        sb.append(")L");
+        sb.append(method.getReturnType().getName());
+        sb.append(";");
+        return sb.toString().replace('.', '/');
+    }
+
+    public static String internalMethodType(Class<?> ... classes) {
+        StringBuilder sb = new StringBuilder();
+        sb.append('(');
+        for(int i = 0; i < classes.length - 1; i ++) {
+            sb.append(internalClassType(classes[i]));
+        }
+        sb.append(')');
+        sb.append(internalClassType(classes[classes.length - 1]));
+        return sb.toString();
+    }
+
+    public static String makeMethodSignature(int argCount) {
+        StringBuilder sb = new StringBuilder();
+        sb.append('(');
+        for (int i = 0; i < argCount; i++) {
+            sb.append("Ljava/lang/Object;");
+        }
+        sb.append(")Ljava/lang/Object;");
+        return sb.toString();
+    }
+
+    public static String internalClassName(Class clazz) {
+        return clazz.getName().replace('.', '/');
+    }
+
+    public static String internalClassType(Class clazz) {
+        if(clazz == int.class) {
+            return "I";
+        } else {
+            return 'L' + clazz.getName().replace('.', '/') + ';';
+        }
     }
 
     static class CompilationFrame {
@@ -86,7 +138,6 @@ public class Compiler {
     Compiler() {
         methodBuilder = null;
     }
-
 
     public void compileQuote(Object ast) {
         Deque<CompilationFrame> stack = new ArrayDeque<>();
@@ -328,6 +379,15 @@ public class Compiler {
                 if(isTail)
                     methodBuilder.insertOpCode(MethodBuilder.ARETURN);
             } else {
+                // recursively compile each subexpression
+                if(!expr.isEmpty()) {
+                    for (Object sub : expr) {
+                        compile(sub, locals, false);
+                    }
+                }
+
+                // TODO: tail recursion if head is the current function to compile
+                // TODO: leave invokedynamic for yet-defined functions
                 // not a special form; recurse on inner list normally
                 // look up head
                 if(!(head instanceof Symbol)) {
@@ -340,15 +400,8 @@ public class Compiler {
                 } else {
                     throw new RuntimeException(head + " can't be used as a function call");
                 }
-                // evaluate each sub expression
-                if(!expr.isEmpty()) {
-                    for (Object sub : expr) {
-                        compile(sub, locals, false);
-                    }
-                }
 
                 if(funcall.isVarargs) {
-                    // methodBuilder.insertOpCode(MethodBuilder.ACONST_NULL);
                     methodBuilder.insertOpCode(EMPTY_LIST);
                     for(int i = funcall.argCount; i < expr.length() + 1; i ++) {
                         methodBuilder.insertOpCode(CONS);
@@ -356,11 +409,6 @@ public class Compiler {
                 }
                 // generate head calling code
                 methodBuilder.insertOpCode(funcall.invoker);
-                /*
-                for (Object op : funcall) {
-                    methodBuilder.insertOpCode(op);
-                }
-                */
                 if(isTail) {
                     methodBuilder.insertOpCode(MethodBuilder.ARETURN);
                 }
@@ -455,7 +503,7 @@ public class Compiler {
                 params = params.rest();
             }
             newParams[paramCount - 1] = params.first();
-            params = LinkedList.makeList(newParams);
+            params = new ArraySequence(newParams);
         }
         methodBuilder = new MethodBuilder(funName, paramCount, isMacro, isVarargs);
 
@@ -476,8 +524,8 @@ public class Compiler {
     }
 
     public Object compileTopLevel(Object ast) throws VerifyError, InvocationTargetException {
-        if(ast instanceof LinkedList) {
-            LinkedList astList = (LinkedList) ast;
+        if(ast instanceof Sequence) {
+            Sequence astList = (Sequence) ast;
             if (DEFUN_SYM.equals(astList.first()) || DEFMACRO_SYM.equals(astList.first())) {
                 return compileMethod(ast);
             }
@@ -505,7 +553,7 @@ public class Compiler {
 
     public static void main(String[] args) throws IOException {
         Compiler compiler = new Compiler();
-        LispReader lispReader = LispReader.fileReader("./src/lisp/test.lisp");
+        LispReader lispReader = LispReader.fileReader("./src/lisp/lang.lisp");
 
         long start = System.currentTimeMillis();
         Object form;

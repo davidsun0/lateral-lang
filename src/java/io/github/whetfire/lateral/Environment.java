@@ -19,6 +19,12 @@ public class Environment {
         return wrapper;
     }
 
+    public static Lambda insertMethod(Symbol name, Method method) {
+        Lambda lambda = new Lambda(method);
+        symMap.put(name, lambda);
+        return lambda;
+    }
+
     public static Class<?> defineTemporaryClass(ClassBuilder classBuilder) {
         return dynamicsManager.defineTemporaryClass(classBuilder.toBytes());
     }
@@ -28,6 +34,10 @@ public class Environment {
         if(ret == null)
             throw new RuntimeException("Can't find symbol in environment: " + symbol);
         return ret;
+    }
+
+    public static boolean doesExist(Symbol symbol) {
+        return symMap.containsKey(symbol);
     }
 
     public static Object getIfExists(Symbol symbol) {
