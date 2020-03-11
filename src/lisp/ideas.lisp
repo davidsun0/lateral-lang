@@ -46,6 +46,15 @@ LinkedList
           (list :invokespecial LinkedList "<init>"
                 "(Ljava/lang/Object;Lio/github/whetfire/lateral/LinkedList;)V"))))
 
+;; alternative asm synatax
+; make it work like quote-unquote
+; perhaps rename asm to asm-quote ?
+(defmacro prep (a b)
+  (asm ,b
+       (:checkcast Sequence)
+       ,a
+       (:invokevirtual Sequence.cons(Object))))
+
 (defun cons (a b)
   (prep a b))
 

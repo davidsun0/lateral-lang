@@ -1,37 +1,35 @@
 package io.github.whetfire.lateral;
 
+import org.objectweb.asm.Type;
+
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 
 public class Lambda {
-    private Method method;
+    final private Method method;
     final boolean isMacro, isVarargs;
-    final int argCount;
-    Sequence invoker;
+    final int paramCount;
+    final private Sequence invoker;
 
     Lambda(Method method) {
         this.method = method;
         isMacro = method.isAnnotationPresent(Macro.class);
         isVarargs = method.isAnnotationPresent(Varargs.class);
-        argCount = method.getParameterCount();
+        paramCount = method.getParameterCount();
         invoker = makeInvoker();
     }
 
     private Sequence makeInvoker() {
         return new ArraySequence(
-                MethodBuilder.INVOKESTATIC,
-                Compiler.internalClassName(method.getDeclaringClass()),
+                Assembler.INVOKESTATIC,
+                Type.getInternalName(method.getDeclaringClass()),
                 method.getName(),
-                Compiler.internalMethodType(method)
+                Type.getMethodDescriptor(method)
         );
     }
 
     Sequence getInvoker() {
         return invoker;
-    }
-
-    boolean isMacro() {
-        return isMacro;
     }
 
     Object invoke(Sequence argVals) {

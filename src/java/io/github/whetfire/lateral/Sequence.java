@@ -1,6 +1,5 @@
 package io.github.whetfire.lateral;
 
-import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Iterator;
 

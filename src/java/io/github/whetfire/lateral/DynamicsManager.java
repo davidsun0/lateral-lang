@@ -31,51 +31,6 @@ class DynamicsManager {
         classMap.put(clazz.getName(), new WeakReference<Class<?>>(clazz, referenceQueue));
     }
 
-    /**
-     * Takes a ClassBuilder and inserts the class it represents into the runtime environment.
-     *
-     * @param classBuilder This ClassBuilder is resolved and converted to bytes and loaded into the JVM.
-     * @return The class represented by the ClassBuilder
-     * @throws VerifyError if the ClassBuilder contains a malformed class
-     */
-    public Class<?> putClass(ClassBuilder classBuilder) throws VerifyError {
-        Class<?> clazz = new ClassDefiner(classBuilder.toBytes()).clazz;
-        putClass(clazz);
-        return clazz;
-    }
-
-    /**
-     * Takes a MethodBuilder and inserts the method it represents into the runtime environment.
-     * The method is inserted into an anonymous class and the class is resolved.
-     *
-     * @param methodBuilder The builder to be used to generate a binary method
-     * @return A Lambda object wrapping the java.lang.reflect.Method
-     * @throws VerifyError if the MethodBuilder represents a malformed method
-     */
-    public Method putMethod(MethodBuilder methodBuilder) throws VerifyError {
-        // If the Class / ClassLoader overhead is too much, try lazily producing classes:
-        // Keep a list of queued methods and only compile into a class when needed
-        // disadvantages:
-        // harder to revoke methods when overwritten (?)
-        // may be harder to debug cause of bad method
-        String className = Compiler.genClassName();
-        ClassBuilder classBuilder = new ClassBuilder(className);
-        classBuilder.addMethod(methodBuilder);
-        Class<?> clazz = new ClassDefiner(classBuilder.toBytes()).clazz;
-        try {
-            Method method = clazz.getMethod(methodBuilder.getName().toString(), methodBuilder.getParameterTypes());
-            putClass(clazz);
-            return method;
-        } catch (NoSuchMethodException nsme) {
-            // something has gone seriously wrong
-            // we just made this class and put the method inside
-            throw new RuntimeException("compiler broken?", nsme);
-        } catch (VerifyError ve) {
-            classBuilder.writeToFile(className + ".class");
-            throw ve;
-        }
-    }
-
     public Method putMethod(byte[] classBytes, String name, Class<?>[] signature) {
         Class<?> clazz = new ClassDefiner(classBytes).clazz;
         try {
