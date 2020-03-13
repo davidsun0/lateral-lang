@@ -1,6 +1,3 @@
-(defun list (:rest lst)
-  lst)
-
 (defun gensym ()
   (asm (:invokestatic "io/github/whetfire/lateral/Symbol"
                       "gensym"
@@ -59,6 +56,14 @@
 
 (inc 123)
 (dec 123)
+
+(defun list (:rest lst)
+  lst)
+
+(defmacro test (a b)
+  `(,a ,b))
+
+(test list '())
 
 (defun range (low hi)
   (asm (de-asm '())

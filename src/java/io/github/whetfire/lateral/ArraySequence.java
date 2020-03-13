@@ -36,11 +36,36 @@ public class ArraySequence extends Sequence {
         return values[index];
     }
 
+    public Object second() {
+        return nth(1);
+    }
+
+    public Object third() {
+        return nth(2);
+    }
+
+    public Object fourth() {
+        return nth(3);
+    }
+
+    public Object nth(int n) {
+        if(index + n < values.length) {
+            return values[index + n];
+        } else {
+            return next.nth(n - (values.length - index));
+        }
+    }
+
     public Sequence rest() {
         if(index + 1 >= values.length) {
             return next;
         } else {
             return new ArraySequence(values, index + 1, next);
         }
+    }
+
+    public int length() {
+        int myLength = values.length - index;
+        return myLength + next.length();
     }
 }

@@ -16,9 +16,11 @@ public class Compiler {
 
     static Symbol DEFMACRO = Symbol.makeSymbol("defmacro");
     static Symbol DEFUN = Symbol.makeSymbol("defun");
+    static Symbol DEFINE = Symbol.makeSymbol("define");
 
     static Symbol QUOTE = Symbol.makeSymbol("quote");
     static Symbol LET = Symbol.makeSymbol("let");
+    static Symbol LIST = Symbol.makeSymbol("list");
 
     static Keyword REST = Keyword.makeKeyword("rest");
 
@@ -26,31 +28,42 @@ public class Compiler {
             Assembler.GETSTATIC, Type.getInternalName(EmptySequence.class),
             "EMPTY_SEQUENCE", Type.getDescriptor(Sequence.class)
     );
+
     static Sequence PARSE_INT = new ArraySequence(
             Assembler.INVOKESTATIC, Type.getInternalName(Integer.class),
             "valueOf", Assembler.getMethodDescriptor(int.class, Integer.class)
     );
+
+    /*
+    TODO: convert MAKE_SYM and MAKE_KEY into invokedynamic calls
+    Use MethodHandles.constant(Symbol.class | Keyword.class, value) so the value is only created once
+    as needed
+     */
     static Sequence MAKE_SYM = new ArraySequence(
             Assembler.INVOKESTATIC, Type.getInternalName(Symbol.class),
             "makeSymbol", Assembler.getMethodDescriptor(String.class, Symbol.class)
     );
+
     static Sequence MAKE_KEY = new ArraySequence(
             Assembler.INVOKESTATIC, Type.getInternalName(Keyword.class),
             "makeKeyword", Assembler.getMethodDescriptor(String.class, Keyword.class)
     );
+
     static Sequence CONS = new ArraySequence(
             Assembler.INVOKESTATIC, Type.getInternalName(Sequence.class),
             "cons", Assembler.getMethodDescriptor(Object.class, Sequence.class, Sequence.class)
     );
 
-    static Lambda isMacroCall(Sequence expr) {
+    static Method isMacroCall(Sequence expr) {
         Object obj = expr.first();
-        if(obj instanceof Symbol) {
+        if (obj instanceof Symbol) {
             Object resource = Environment.getIfExists((Symbol) obj);
-            if(resource instanceof Lambda) {
-                Lambda lambda = (Lambda) resource;
-                if(lambda.isMacro) {
-                    return lambda;
+            if(resource instanceof Function && ((Function) resource).isMacro()) {
+                try {
+                    Class<?>[] classes = Assembler.getParameterClasses(expr.length() - 1);
+                    return resource.getClass().getMethod("invokeStatic", classes);
+                } catch (NoSuchMethodException nsme) {
+                    return null;
                 }
             }
         }
@@ -59,18 +72,26 @@ public class Compiler {
 
     static Object macroExpand(Object expr) {
         while(true) {
-            // macro calls must be linked lists
             if(!(expr instanceof Sequence)) {
                 return expr;
             }
-
-            Lambda macro = isMacroCall((Sequence) expr);
-            if (macro == null) {
-                // not a macro call
-                return expr;
+            Method macro = isMacroCall((Sequence) expr);
+            if(macro != null) {
+                try {
+                    // System.out.println(macro);
+                    Object[] args = new Object[macro.getParameterCount()];
+                    // ignore the first arg, which is the macro name
+                    for(int i = 0; i < args.length; i ++) {
+                        args[i] = ((Sequence) expr).nth(i + 1);
+                    }
+                    //expr = macro.invoke(null, ((Sequence) expr).second());
+                    expr = macro.invoke(null, args);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    return expr;
+                }
             } else {
-                // loop because macros may evaluate to macros
-                expr = macro.invoke(((Sequence)expr).rest());
+                return expr;
             }
         }
     }
@@ -78,7 +99,6 @@ public class Compiler {
     private static void compileQuote(Object ast, ArrayList<Object> opcodes) {
         if(ast == null) {
             throw new NullPointerException();
-            // opcodes.add(ACONST_NULL);
         } else if (ast.equals(EmptySequence.EMPTY_SEQUENCE)) {
             // quoted empty list '()
             opcodes.add(EMPTY_LIST);
@@ -95,6 +115,12 @@ public class Compiler {
         } else if (ast instanceof Symbol) {
             opcodes.add(ArraySequence.makeList(LDC, ast.toString()));
             opcodes.add(MAKE_SYM);
+            /*
+            opcodes.add(ArraySequence.makeList(
+                    Assembler.INVOKEDYNAMIC, ast.toString(),
+                    "()" + Type.getInternalName(Symbol.class)
+            ));
+            */
         } else if (ast instanceof Keyword) {
             opcodes.add(ArraySequence.makeList(LDC, ((Keyword) ast).getValue()));
             opcodes.add(MAKE_KEY);
@@ -116,12 +142,9 @@ public class Compiler {
             Sequence astSequence = (Sequence) ast;
             Object head = astSequence.first();
             Sequence body = astSequence.rest();
-            /* if(head.equals(DEFUN) || head.equals(DEFMACRO)) {
-                boolean isMacro = head.equals(DEFMACRO);
-                // (defun name (args) body)
-                return compileFunction(astSequence);
-                // throw new RuntimeException();
-            } else */ if(head.equals(ASM)) {
+            if(astSequence.isEmpty()) {
+                opExprs.add(EMPTY_LIST);
+            } else if(head.equals(ASM)) {
                 // literal bytecode assembly; inject its values directly
                 // TODO: better de-asm with tree traversal
                 for (Object asmExpr : body) {
@@ -142,7 +165,7 @@ public class Compiler {
                 // TODO: assert correct number and type of vars / bindings
                 int localCount = locals.size();
                 // bind locals
-                while(!bindList.isEmpty()) {
+                while (!bindList.isEmpty()) {
                     int localIndex = -1;
                     Symbol bindSym = (Symbol) bindList.first();
                     // if symbol already exists in this let environment, rebind value
@@ -165,20 +188,31 @@ public class Compiler {
                 compile(opExprs, letBody, locals, isTail);
                 // pop locals after body completes
                 locals.subList(localCount, locals.size()).clear();
+            } else if(head.equals(LIST)) {
+                // TODO: more efficient list creation (use ArraySequence?)
+                // TODO: same in quote compile
+                for(Object arg : body) {
+                    compile(opExprs, arg, locals, false);
+                }
+                opExprs.add(EMPTY_LIST);
+                for (int i = 0; i < body.length(); i++) {
+                    opExprs.add(CONS);
+                }
             } else {
-                if(head instanceof Symbol && Environment.getIfExists((Symbol) head) instanceof Lambda) {
+                if(head instanceof Symbol) {
+                    // load arguments onto stack
                     for(Object arg : body) {
                         compile(opExprs, arg, locals, false);
                     }
-                    Lambda funcall = (Lambda) Environment.get((Symbol) head);
-                    if(funcall.isVarargs) {
-                        // convert extra args to a single list
-                        opExprs.add(EMPTY_LIST);
-                        for (int i = funcall.paramCount; i < body.length() + 1; i++) {
-                            opExprs.add(CONS);
-                        }
-                    }
-                    opExprs.add(funcall.getInvoker());
+                    /*
+                    (invokedynamic head (...)LObject;
+                    use invokedynamic to get function at runtime
+                    see Environment.bootstrapMethod
+                     */
+                    opExprs.add(ArraySequence.makeList(
+                            Assembler.INVOKEDYNAMIC, head.toString(),
+                            Assembler.getMethodDescriptor(Assembler.getParameterClasses(body.length() + 1))
+                    ));
                 } else {
                     throw new RuntimeException(head + " can't be used as a function");
                 }
@@ -256,14 +290,20 @@ public class Compiler {
                 Object body = astSequence.fourth();
 
                 ArrayList<Object> opcodes = compile(new ArrayList<>(), body, locals, true);
-                Method method = Assembler.compileMethod(dm, isMacro, isVarargs, opcodes, name.toString(), paramCount);
-                return Environment.insertMethod(name, method);
+                Function function = Assembler.compileMethod(
+                        dm, isMacro, isVarargs, opcodes, name.toString(), paramCount
+                );
+                return Environment.insert(name, function);
             }
         }
         ArrayList<Object> opcodes = compile(new ArrayList<>(), ast, new ArrayList<>(), true);
-        Method method = Assembler.compileMethod(dm, opcodes);
+        Function function = Assembler.compileMethod(dm, opcodes);
         try {
-            return method.invoke(null, (Object[]) null);
+            /*
+            Method m = function.getClass().getMethod("invoke");
+            return m.invoke(null);
+            */
+            return function.invoke();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -278,11 +318,17 @@ public class Compiler {
     }
 
     public static void main(String[] args) throws IOException {
-        LispReader lispReader = LispReader.fileReader("./src/lisp/lang.lisp");
+        LispReader lispReader = LispReader.fileReader("./src/lisp/test.lisp");
         DynamicsManager dynamicsManager = new DynamicsManager();
         Object form;
+        // long last = System.currentTimeMillis();
         while((form = lispReader.readForm()) != null) {
             System.out.println(eval(dynamicsManager, form));
+            /*
+            long now = System.currentTimeMillis();
+            System.out.println(now - last);
+            last = now;
+            */
         }
     }
 }

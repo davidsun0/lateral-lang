@@ -4,7 +4,11 @@ import org.objectweb.asm.*;
 import org.objectweb.asm.util.CheckClassAdapter;
 
 import java.io.PrintWriter;
-import java.lang.reflect.Method;
+import java.lang.invoke.CallSite;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.HashMap;
 
@@ -13,6 +17,18 @@ import static org.objectweb.asm.Opcodes.ACC_STATIC;
 
 public class Assembler {
     static final private int JAVA_VERSION = 55; // 55.0 = Java 11
+    static final Handle ENVIR_BOOTSTRAP = new Handle(
+            Opcodes.H_INVOKESTATIC, Type.getInternalName(Environment.class),
+            "bootstrapMethod",
+            MethodType.methodType(
+                    CallSite.class,
+                    MethodHandles.Lookup.class,
+                    String.class,
+                    MethodType.class,
+                    String.class
+            ).toMethodDescriptorString(),
+            false
+    );
 
     static Keyword LABEL = Keyword.makeKeyword("label");
     static HashMap<Keyword, Integer> jumpOpMap = new HashMap<>();
@@ -29,6 +45,7 @@ public class Assembler {
     static Keyword INVOKESTATIC = Keyword.makeKeyword("invokestatic");
     static Keyword INVOKEVIRTUAL = Keyword.makeKeyword("invokevirtual");
     static Keyword INVOKESPECIAL = Keyword.makeKeyword("invokespecial");
+    static Keyword INVOKEDYNAMIC = Keyword.makeKeyword("invokedynamic");
 
     static Keyword GETSTATIC = Keyword.makeKeyword("getstatic");
 
@@ -86,6 +103,7 @@ public class Assembler {
     private static int classNum = 0;
 
     static ClassWriter makeClassWriter() {
+        // let ASM library compute method frames and max values
         ClassWriter classWriter = new ClassWriter(ClassWriter.COMPUTE_FRAMES + ClassWriter.COMPUTE_MAXS);
         //ClassWriter classWriter = new ClassWriter(0);
         // signature:  typed class for generics, e.g. ArrayList<String>. null for none
@@ -93,9 +111,81 @@ public class Assembler {
         // interfaces: null for none
         String className = "AnonClass" + (classNum ++);
         classWriter.visit(JAVA_VERSION, ACC_PUBLIC, className, null,
-                Type.getInternalName(Object.class), null);
+                Type.getInternalName(Function.class), null);
 
         return classWriter;
+    }
+
+    static void visitEmptyConstructor(ClassWriter classWriter) {
+        MethodVisitor mv = classWriter.visitMethod(ACC_PUBLIC, "<init>", "()V", null, null);
+        mv.visitCode();
+        mv.visitVarInsn(Opcodes.ALOAD, 0);
+        mv.visitMethodInsn(Opcodes.INVOKESPECIAL, Type.getInternalName(Function.class),
+                "<init>","()V", false);
+        mv.visitInsn(Opcodes.RETURN);
+        mv.visitMaxs(1, 1);
+        mv.visitEnd();
+    }
+
+    static void visitToString(ClassWriter classWriter, String string) {
+        MethodVisitor mv = classWriter.visitMethod(ACC_PUBLIC, "toString", "()Ljava/lang/String;", null, null);
+        mv.visitCode();
+        mv.visitLdcInsn(string);
+        mv.visitInsn(Opcodes.ARETURN);
+        mv.visitMaxs(1, 1);
+        mv.visitEnd();
+    }
+
+    static void visitStaticInvokeHook(ClassWriter classWriter, String className) {
+        MethodVisitor mv = classWriter.visitMethod(ACC_PUBLIC,
+                "invoke", "()Ljava/lang/Object;", null, null);
+        mv.visitCode();
+        mv.visitMethodInsn(Opcodes.INVOKESTATIC,
+                className, "invokeStatic", "()Ljava/lang/Object;",
+                false);
+        mv.visitInsn(Opcodes.ARETURN);
+        mv.visitMaxs(1, 1);
+        mv.visitEnd();
+    }
+
+    static void visitMacroAndVarargs(ClassWriter classWriter, boolean isMacro, boolean isVarargs) {
+        MethodVisitor mv = classWriter.visitMethod(ACC_PUBLIC,
+                "isMacro", "()Z", null, null);
+        mv.visitCode();
+        if(isMacro) {
+            mv.visitInsn(Opcodes.ICONST_1);
+        } else {
+            mv.visitInsn(Opcodes.ICONST_0);
+        }
+        mv.visitInsn(Opcodes.IRETURN);
+        mv.visitMaxs(1, 1);
+        mv.visitEnd();
+
+
+        mv = classWriter.visitMethod(ACC_PUBLIC,
+                "isVarargs", "()Z", null, null);
+        mv.visitCode();
+        if(isVarargs) {
+            mv.visitInsn(Opcodes.ICONST_1);
+        } else {
+            mv.visitInsn(Opcodes.ICONST_0);
+        }
+        mv.visitInsn(Opcodes.IRETURN);
+        mv.visitMaxs(1, 1);
+        mv.visitEnd();
+    }
+
+    static void visitParamCount(ClassWriter classWriter, int paramc) {
+        MethodVisitor mv = classWriter.visitMethod(ACC_PUBLIC, "paramCount", "()I", null, null);
+        mv.visitCode();
+        if (paramc <= 4) {
+            mv.visitInsn(Opcodes.ICONST_0 + paramc);
+        } else {
+            mv.visitLdcInsn(paramc);
+        }
+        mv.visitInsn(Opcodes.IRETURN);
+        mv.visitMaxs(1, 0);
+        mv.visitEnd();
     }
 
     static void visitOpCodes(MethodVisitor mv, ArrayList<Object> opcodes) {
@@ -129,14 +219,23 @@ public class Assembler {
                 } else if(INVOKESTATIC.equals(head) || INVOKEVIRTUAL.equals(head) || INVOKESPECIAL.equals(head)) {
                     // TODO: invokeinterface
                     mv.visitMethodInsn(opMap.get(head),
-                            (String) ((Sequence) opcode).second(),
-                            (String) ((Sequence) opcode).third(),
-                            (String) ((Sequence) opcode).fourth(), false);
+                            (String) body.first(),
+                            (String) body.second(),
+                            (String) body.third(),
+                            false);
+                } else if(INVOKEDYNAMIC.equals(head)) {
+                    // contain the handle information in the invokedynamic ir?
+                    // (:invokedynamic (handle-class handle-name handle-type) dyn-name dyn-type bsma ...)
+                    mv.visitInvokeDynamicInsn(
+                            (String) body.first(),
+                            (String) body.second(),
+                            ENVIR_BOOTSTRAP, "test"
+                    );
                 } else if(head.equals(GETSTATIC)) {
                     mv.visitFieldInsn(Opcodes.GETSTATIC,
-                            (String) ((Sequence) opcode).second(),
-                            (String) ((Sequence) opcode).third(),
-                            (String) ((Sequence) opcode).fourth());
+                            (String) body.first(),
+                            (String) body.second(),
+                            (String) body.third());
                 } else if(head.equals(ALOAD)) {
                     int value = (Integer) body.first();
                     mv.visitVarInsn(Opcodes.ALOAD, value);
@@ -166,9 +265,11 @@ public class Assembler {
         }
     }
 
-    static Method compileMethod(DynamicsManager dynamicsManager,
+    static Function compileMethod(DynamicsManager dynamicsManager,
                                 boolean isMacro, boolean isVarargs, ArrayList<Object> opcodes, String name, int argc) {
         Class<?>[] classes = getParameterClasses(argc);
+        if(isVarargs)
+            classes[argc - 1] = Sequence.class;
         Type[] types = new Type[classes.length];
         for(int i = 0; i < classes.length; i ++) {
             types[i] = Type.getType(classes[i]);
@@ -176,12 +277,15 @@ public class Assembler {
         String descriptor = Type.getMethodDescriptor(Type.getType(Object.class), types);
 
         ClassWriter classWriter = makeClassWriter();
-        MethodVisitor mv = classWriter.visitMethod(ACC_PUBLIC | ACC_STATIC, name, descriptor, null, null);
-        if(isMacro)
-            mv.visitAnnotation(Type.getDescriptor(Macro.class), true);
-        if(isVarargs)
-            mv.visitAnnotation(Type.getDescriptor(Varargs.class), true);
+        visitEmptyConstructor(classWriter);
+        visitToString(classWriter, name);
+        visitStaticInvokeHook(classWriter, "AnonClass" + (classNum - 1));
 
+        visitMacroAndVarargs(classWriter, isMacro, isVarargs);
+        visitParamCount(classWriter, argc);
+
+        MethodVisitor mv = classWriter.visitMethod(ACC_PUBLIC | ACC_STATIC,
+                "invokeStatic", descriptor, null, null);
         mv.visitCode();
         visitOpCodes(mv, opcodes);
         mv.visitMaxs(10, argc);
@@ -190,14 +294,22 @@ public class Assembler {
         classWriter.visitEnd();
         byte[] classBytes = classWriter.toByteArray();
         /*
-        PrintWriter printWriter = new PrintWriter(System.err);
+        System.out.println();
+        PrintWriter printWriter = new PrintWriter(System.out);
         CheckClassAdapter.verify(new ClassReader(classBytes), true, printWriter);
         Compiler.writeToFile("Test.class", classBytes);
-        */
-        return dynamicsManager.putMethod(classBytes, name, classes);
+        //*/
+        Class<?> clazz = dynamicsManager.defineTemporaryClass(classBytes);
+        try {
+            Constructor<?> constructor = clazz.getConstructor();
+            return (Function) constructor.newInstance();
+        } catch (NoSuchMethodException | IllegalAccessException
+                | InvocationTargetException | InstantiationException e) {
+            throw new RuntimeException(e);
+        }
     }
 
-    static Method compileMethod(DynamicsManager dynamicsManager, ArrayList<Object> opcodes) {
-        return compileMethod(dynamicsManager, false, false, opcodes, "invoke", 0);
+    static Function compileMethod(DynamicsManager dynamicsManager, ArrayList<Object> opcodes) {
+        return compileMethod(dynamicsManager, false, false, opcodes, "anon", 0);
     }
 }
