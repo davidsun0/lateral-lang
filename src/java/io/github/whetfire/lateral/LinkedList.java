@@ -23,6 +23,18 @@ public class LinkedList extends Sequence {
         return value;
     }
 
+    public Object second() {
+        return next.first();
+    }
+
+    public Object third() {
+        return rest().second();
+    }
+
+    public Object fourth() {
+        return rest().third();
+    }
+
     public Sequence rest() {
         return next;
     }

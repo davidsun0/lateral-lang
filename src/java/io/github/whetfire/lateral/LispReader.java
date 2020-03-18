@@ -10,11 +10,11 @@ public class LispReader {
     private Reader stream;
     private Deque<Character> deque = new ArrayDeque<>();
 
-    static public Symbol QUOTE = Symbol.makeSymbol("quote");
-    static public Symbol UNQUOTE = Symbol.makeSymbol("unquote");
-    static public Symbol UNQUOTE_SPLICING = Symbol.makeSymbol("unquote-splicing");
-    static public Symbol LIST = Symbol.makeSymbol("list");
-    static public Symbol CONCAT = Symbol.makeSymbol("concat");
+    static Symbol QUOTE = Symbol.makeSymbol("quote");
+    static Symbol UNQUOTE = Symbol.makeSymbol("unquote");
+    static Symbol UNQUOTE_SPLICING = Symbol.makeSymbol("unquote-splicing");
+    static Symbol LIST = Symbol.makeSymbol("list");
+    static Symbol CONCAT = Symbol.makeSymbol("concat");
 
     public LispReader(Reader reader) {
         this.stream = reader;
@@ -185,7 +185,7 @@ public class LispReader {
 
     /**
      * Ahh, the glorious quasiquote, the crown jewel of programs that write programs.
-     * I have a truly marvelous explanation of quasiquote which cannot fit in this doc comment.
+     * I have a truly marvelous explanation of quasiquote expansion which this doc comment cannot contain.
      * @param list The body of the quasiquoted expression
      * @return An expanded representation of list
      */
@@ -226,10 +226,9 @@ public class LispReader {
         } else if(quoteBody instanceof Sequence) {
             Sequence seqBody = (Sequence) quoteBody;
             if(seqBody.first().equals(UNQUOTE)) {
-                // TODO: not sure if this is in the right place
                 return seqBody.second();
             } else if(seqBody.first().equals(UNQUOTE_SPLICING)) {
-                throw new RuntimeException("pretty sure quasiquote - unquote splicing is illegal");
+                throw new RuntimeException("unquote-splicing is illegal in top-level quasiquote");
             } else {
                 return quasiQuoteHelper((Sequence) quoteBody);
             }

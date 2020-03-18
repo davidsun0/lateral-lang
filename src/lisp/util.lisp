@@ -26,7 +26,7 @@
        :pop
        (:invokevirtual "java/lang/Object" "toString" "()Ljava/lang/String;")))
 
-(str-concat "L" "java/lang/String" ";")
+;(str-concat "L" "java/lang/String" ";")
 
 ;; alternative asm synatax
 ; make it work like quote-unquote

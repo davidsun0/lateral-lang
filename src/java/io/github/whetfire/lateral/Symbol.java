@@ -1,16 +1,16 @@
 package io.github.whetfire.lateral;
 
 public final class Symbol {
-    public final static Symbol NULL_SYMBOL = makeSymbol("null");
-    public final static Symbol TRUE_SYMBOL = makeSymbol("true");
-
     private final String value;
+    private final int hash;
 
     private Symbol(String value){
         this.value = value;
+        hash = value.hashCode();
     }
 
     public static Symbol makeSymbol(String value) {
+        // TODO: Symbol interning
         return new Symbol(value);
     }
 
@@ -26,14 +26,14 @@ public final class Symbol {
     }
 
     public int hashCode() {
-        return value.hashCode();
+        return hash;
     }
 
     public boolean equals(Object obj) {
         if(obj == this)
             return true;
         else
-            return obj instanceof Symbol && value.equals(((Symbol) obj).value);
+            return obj instanceof Symbol && hash == ((Symbol) obj).hash;
     }
 
     public String toString() {

@@ -4,15 +4,17 @@ import org.objectweb.asm.Type;
 
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.lang.reflect.Method;
+import java.lang.invoke.CallSite;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.util.ArrayList;
 
 import static io.github.whetfire.lateral.Assembler.*;
 
 public class Compiler {
 
-    private static Symbol ASM = Symbol.makeSymbol("asm");
-    private static Symbol DEASM = Symbol.makeSymbol("de-asm");
+    static Symbol ASM = Symbol.makeSymbol("asm-quote");
+    static Symbol DEASM = Symbol.makeSymbol("unquote");
 
     static Symbol DEFMACRO = Symbol.makeSymbol("defmacro");
     static Symbol DEFUN = Symbol.makeSymbol("defun");
@@ -49,47 +51,38 @@ public class Compiler {
             "makeKeyword", Assembler.getMethodDescriptor(String.class, Keyword.class)
     );
 
-    static Sequence CONS = new ArraySequence(
-            Assembler.INVOKESTATIC, Type.getInternalName(Sequence.class),
-            "cons", Assembler.getMethodDescriptor(Object.class, Sequence.class, Sequence.class)
+    private static Sequence ENVIR_BOOTSTRAP = new ArraySequence(
+            Type.getInternalName(Environment.class), "bootstrapMethod",
+            MethodType.methodType(CallSite.class, MethodHandles.Lookup.class, String.class,
+                                MethodType.class, String.class).toMethodDescriptorString()
     );
 
-    static Method isMacroCall(Sequence expr) {
-        Object obj = expr.first();
-        if (obj instanceof Symbol) {
-            Object resource = Environment.getIfExists((Symbol) obj);
-            if(resource instanceof Function && ((Function) resource).isMacro()) {
-                try {
-                    Class<?>[] classes = Assembler.getParameterClasses(expr.length() - 1);
-                    return resource.getClass().getMethod("invokeStatic", classes);
-                } catch (NoSuchMethodException nsme) {
-                    return null;
-                }
-            }
-        }
-        return null;
-    }
+    private static Sequence SEQUENCE_BOOTSTRAP = new ArraySequence(
+            Type.getInternalName(Sequence.class), "sequenceBuilder",
+            MethodType.methodType(CallSite.class, MethodHandles.Lookup.class, String.class,
+                                MethodType.class).toMethodDescriptorString()
+    );
 
     static Object macroExpand(Object expr) {
         while(true) {
             if(!(expr instanceof Sequence)) {
                 return expr;
             }
-            Method macro = isMacroCall((Sequence) expr);
-            if(macro != null) {
-                try {
-                    // System.out.println(macro);
-                    Object[] args = new Object[macro.getParameterCount()];
+            Object head = ((Sequence) expr).first();
+            if(!(head instanceof Symbol)) {
+                return expr;
+            }
+            Object resource = Environment.getIfExists((Symbol) head);
+            if(resource instanceof Function && ((Function) resource).isMacro()) {
+                Function macro = (Function) resource;
+                Object[] args = new Object[macro.paramCount()];
+                Sequence argSeq = ((Sequence) expr).rest();
+                for(int i = 0; i < args.length; i ++) {
                     // ignore the first arg, which is the macro name
-                    for(int i = 0; i < args.length; i ++) {
-                        args[i] = ((Sequence) expr).nth(i + 1);
-                    }
-                    //expr = macro.invoke(null, ((Sequence) expr).second());
-                    expr = macro.invoke(null, args);
-                } catch (Exception e) {
-                    e.printStackTrace();
-                    return expr;
+                    args[i] = argSeq.first();
+                    argSeq = argSeq.rest();
                 }
+                expr = macro.apply(args);
             } else {
                 return expr;
             }
@@ -108,19 +101,17 @@ public class Compiler {
             for(Object o : astSeq) {
                 compileQuote(o, opcodes);
             }
-            opcodes.add(EMPTY_LIST);
-            for(int i = 0; i < seqLen; i ++) {
-                opcodes.add(CONS);
-            }
+            Class<?>[] methodClasses = Assembler.getParameterClasses(seqLen + 1);
+            methodClasses[methodClasses.length - 1] = Sequence.class;
+            opcodes.add(ArraySequence.makeList(
+                    Assembler.INVOKEDYNAMIC,
+                    SEQUENCE_BOOTSTRAP,
+                    "makeSequence",
+                    Assembler.getMethodDescriptor(methodClasses)
+            ));
         } else if (ast instanceof Symbol) {
             opcodes.add(ArraySequence.makeList(LDC, ast.toString()));
             opcodes.add(MAKE_SYM);
-            /*
-            opcodes.add(ArraySequence.makeList(
-                    Assembler.INVOKEDYNAMIC, ast.toString(),
-                    "()" + Type.getInternalName(Symbol.class)
-            ));
-            */
         } else if (ast instanceof Keyword) {
             opcodes.add(ArraySequence.makeList(LDC, ((Keyword) ast).getValue()));
             opcodes.add(MAKE_KEY);
@@ -160,7 +151,10 @@ public class Compiler {
             } else if(head.equals(QUOTE)) {
                 compileQuote(astSequence.second(), opExprs);
             } else if(head.equals(LET)) {
-                // TODO: assert that let has 2 arguments
+                if(body.length() != 2) {
+                    // assert that let has 2 arguments
+                    throw new SyntaxException("let expects two arguments");
+                }
                 Sequence bindList = (Sequence) body.first();
                 // TODO: assert correct number and type of vars / bindings
                 int localCount = locals.size();
@@ -189,16 +183,19 @@ public class Compiler {
                 // pop locals after body completes
                 locals.subList(localCount, locals.size()).clear();
             } else if(head.equals(LIST)) {
-                // TODO: more efficient list creation (use ArraySequence?)
-                // TODO: same in quote compile
                 for(Object arg : body) {
                     compile(opExprs, arg, locals, false);
                 }
-                opExprs.add(EMPTY_LIST);
-                for (int i = 0; i < body.length(); i++) {
-                    opExprs.add(CONS);
-                }
+                Class<?>[] methodClasses = Assembler.getParameterClasses(body.length() + 1);
+                methodClasses[methodClasses.length - 1] = Sequence.class;
+                opExprs.add(ArraySequence.makeList(
+                        Assembler.INVOKEDYNAMIC,
+                        SEQUENCE_BOOTSTRAP,
+                        "makeSequence",
+                        Assembler.getMethodDescriptor(methodClasses)
+                ));
             } else {
+                // TODO: implement tail recursion optimization; need function's name or recur keyword
                 if(head instanceof Symbol) {
                     // load arguments onto stack
                     for(Object arg : body) {
@@ -210,11 +207,14 @@ public class Compiler {
                     see Environment.bootstrapMethod
                      */
                     opExprs.add(ArraySequence.makeList(
-                            Assembler.INVOKEDYNAMIC, head.toString(),
-                            Assembler.getMethodDescriptor(Assembler.getParameterClasses(body.length() + 1))
+                            Assembler.INVOKEDYNAMIC,
+                            ENVIR_BOOTSTRAP,
+                            head.toString(),
+                            Assembler.getMethodDescriptor(Assembler.getParameterClasses(body.length() + 1)),
+                            "test"
                     ));
                 } else {
-                    throw new RuntimeException(head + " can't be used as a function");
+                    throw new TypeException(head + " can't be used as a function");
                 }
             }
         } else if(ast instanceof Symbol) {
@@ -240,17 +240,9 @@ public class Compiler {
             if (index >= 0) {
                 opExprs.add(ArraySequence.makeList(Assembler.ALOAD, index));
             } else {
+                // TODO: look up in closure environment, then global environment
                 throw new RuntimeException(ast.toString());
             }
-
-            /*
-            // TODO: look up in environment
-            opExprs.add(ArraySequence.makeList(Assembler.LDC, ast.toString()));
-            opExprs.add(Compiler.MAKE_SYM);
-            if(isTail)
-                opExprs.add(ARETURN);
-            throw new RuntimeException(ast.toString());
-            */
         } else if(ast instanceof Keyword) {
             opExprs.add(ArraySequence.makeList(Assembler.LDC, ((Keyword) ast).getValue()));
             opExprs.add(MAKE_KEY);
@@ -267,7 +259,7 @@ public class Compiler {
         return opExprs;
     }
 
-    static Object eval(DynamicsManager dm, Object ast) {
+    static Object eval(Object ast) {
         if(ast instanceof Sequence) {
             Sequence astSequence = (Sequence)ast;
             if(astSequence.first().equals(DEFUN) || astSequence.first().equals(DEFMACRO)) {
@@ -279,6 +271,7 @@ public class Compiler {
                 int paramCount = params.length();
                 boolean isVarargs = paramCount > 1 && REST.equals(params.nth(params.length() - 2));
                 ArrayList<Symbol> locals = new ArrayList<>();
+                locals.add(null); // first local is 'this'
                 for(int i = 0; i < paramCount; i ++) {
                     if(!(isVarargs && i == paramCount - 2)) {
                         locals.add((Symbol) params.nth(i));
@@ -291,19 +284,17 @@ public class Compiler {
 
                 ArrayList<Object> opcodes = compile(new ArrayList<>(), body, locals, true);
                 Function function = Assembler.compileMethod(
-                        dm, isMacro, isVarargs, opcodes, name.toString(), paramCount
+                        isMacro, isVarargs, opcodes, name.toString(), paramCount
                 );
                 return Environment.insert(name, function);
             }
         }
-        ArrayList<Object> opcodes = compile(new ArrayList<>(), ast, new ArrayList<>(), true);
-        Function function = Assembler.compileMethod(dm, opcodes);
+        ArrayList<Symbol> locals = new ArrayList<>();
+        locals.add(null);
+        ArrayList<Object> opcodes = compile(new ArrayList<>(), ast, locals, true);
+        Function function = Assembler.compileMethod(opcodes);
         try {
-            /*
-            Method m = function.getClass().getMethod("invoke");
-            return m.invoke(null);
-            */
-            return function.invoke();
+            return function.apply();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -318,12 +309,11 @@ public class Compiler {
     }
 
     public static void main(String[] args) throws IOException {
-        LispReader lispReader = LispReader.fileReader("./src/lisp/test.lisp");
-        DynamicsManager dynamicsManager = new DynamicsManager();
+        LispReader lispReader = LispReader.fileReader("./src/lisp/lang.lisp");
         Object form;
         // long last = System.currentTimeMillis();
         while((form = lispReader.readForm()) != null) {
-            System.out.println(eval(dynamicsManager, form));
+            System.out.println(eval(form));
             /*
             long now = System.currentTimeMillis();
             System.out.println(now - last);

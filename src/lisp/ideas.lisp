@@ -61,3 +61,22 @@ LinkedList
 cons
 
 (cons 1 null)
+
+(defun range (lo hi)
+  (asm (de-asm '())
+       (de-asm hi)
+       (:checkcast "java/lang/Integer")
+       (:goto test)
+       (:label loop)
+       (de-asm (stack-call dec 1))
+       (:checkcast "java/lang/Integer")
+       :dup_x1
+       (de-asm (stack-call cons 1))
+       :swqp
+       (:label test)
+       :dup
+       (de-asm low)
+       (:checkcast "java/lang/Integer")
+       (:invokevirtual "java/lang/Integer" "compareTo" "(Ljava/lang/Integer;)I")
+       (:ifgt loop)
+       :pop))

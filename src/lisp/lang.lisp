@@ -1,10 +1,10 @@
 (defun gensym ()
-  (asm (:invokestatic "io/github/whetfire/lateral/Symbol"
-                      "gensym"
-                      "()Lio/github/whetfire/lateral/Symbol;")))
+  (asm-quote (:invokestatic "io/github/whetfire/lateral/Symbol"
+                            "gensym"
+                            "()Lio/github/whetfire/lateral/Symbol;")))
 
 (defun concat (:rest lst)
-  (asm (de-asm lst)
+  (asm-quote ,lst
        (:checkcast "io/github/whetfire/lateral/Sequence")
        (:invokestatic "io/github/whetfire/lateral/Sequence"
                       "concat"
@@ -13,18 +13,18 @@
 (defmacro if (test then else)
   (let (elselab (gensym)
         endlab  (gensym))
-    `(asm (de-asm  ,test)
+    `(asm-quote ,,test
           (:ifnull ,elselab)
-          (de-asm  ,then)
+          ,,then
           (:goto   ,endlab)
           (:label  ,elselab)
-          (de-asm  ,else)
+          ,,else
           (:label  ,endlab))))
 
 (defmacro prep (a b)
-  `(asm (de-asm ,b)
+  `(asm-quote ('unquote ,b)
         (:checkcast "io/github/whetfire/lateral/Sequence")
-        (de-asm ,a)
+        ('unquote ,a)
         (:invokevirtual "io/github/whetfire/lateral/Sequence"
                         "cons"
                         "(Ljava/lang/Object;)Lio/github/whetfire/lateral/Sequence;")))
@@ -33,56 +33,28 @@
   (prep a b))
 
 (defmacro invoke-cons ()
-  `(asm (:invokevirtual "io/github/whetfire/lateral/Sequence"
+  `(asm-quote (:invokevirtual "io/github/whetfire/lateral/Sequence"
                   "cons"
                   "(Ljava/lang/Object;)Lio/github/whetfire/lateral/Sequence;")))
 
 (defmacro prim-int (int-obj)
-  `(asm (de-asm ,int-obj)
+  `(asm-quote ('unquote ,int-obj)
         (:checkcast "java/lang/Integer")
         (:invokevirtual "java/lang/Integer" "intValue" "()I")))
 
 (defun dec (n)
-  (asm (de-asm (prim-int n))
+  (asm-quote ,(prim-int n)
        (:iconst 1)
        :isub
        (:invokestatic "java/lang/Integer" "valueOf" "(I)Ljava/lang/Integer;")))
 
 (defun inc (n)
-  (asm (de-asm (prim-int n))
+  (asm-quote ,(prim-int n)
        (:iconst 1)
        :iadd
        (:invokestatic "java/lang/Integer" "valueOf" "(I)Ljava/lang/Integer;")))
 
-(inc 123)
-(dec 123)
+(inc 1234)
+(dec 1234)
 
-(defun list (:rest lst)
-  lst)
-
-(defmacro test (a b)
-  `(,a ,b))
-
-(test list '())
-
-(defun range (low hi)
-  (asm (de-asm '())
-       (de-asm hi)
-       (:checkcast "java/lang/Integer")
-       (:goto test)
-       (:label loop)
-       (de-asm (dec)) ; stack arg hack
-       (:checkcast "java/lang/Integer")
-       :dup_x1
-       (de-asm (invoke-cons))
-       :swap
-       (:label test)
-       :dup
-       (de-asm low)
-       (:checkcast "java/lang/Integer")
-       (:invokevirtual "java/lang/Integer" "compareTo" "(Ljava/lang/Integer;)I")
-       (:ifgt loop)
-       :pop))
-
-(range 0 10)
-
+(cons "abc" '())

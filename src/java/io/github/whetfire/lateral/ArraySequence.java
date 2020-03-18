@@ -25,6 +25,16 @@ public class ArraySequence extends Sequence {
         this.next = next;
     }
 
+    public static Sequence makeList(int index, Object ... values) {
+        if(index == values.length) {
+            return EmptySequence.EMPTY_SEQUENCE;
+        } else if (index < values.length) {
+            return new ArraySequence(values, index);
+        } else {
+            throw new RuntimeException("invalid ArraySequence");
+        }
+    }
+
     public static Sequence makeList(Object ... values) {
         if(values == null || values.length == 0)
             return EmptySequence.EMPTY_SEQUENCE;

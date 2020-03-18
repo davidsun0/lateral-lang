@@ -1,5 +1,6 @@
 package io.github.whetfire.lateral;
 
+import java.lang.invoke.*;
 import java.util.ArrayList;
 import java.util.Iterator;
 
@@ -12,33 +13,13 @@ public abstract class Sequence implements Iterable<Object> {
 
     public abstract Object first();
 
+    abstract public Object second();
+
+    abstract public Object third();
+
+    abstract public Object fourth();
+
     public abstract Sequence rest();
-
-    public Sequence cons(Object obj) {
-        return new LinkedList(obj, this);
-    }
-
-    public static Sequence cons(Object obj, Sequence sequence) {
-        if(sequence == null)
-            throw new RuntimeException("Sequence cannot be null");
-        return sequence.cons(obj);
-    }
-
-    public boolean isEmpty() {
-        return false;
-    }
-
-    public Object second() {
-        return rest().first();
-    }
-
-    public Object third() {
-        return rest().rest().first();
-    }
-
-    public Object fourth() {
-        return rest().rest().rest().first();
-    }
 
     public Object nth(int n) {
         Sequence sequence = this;
@@ -58,6 +39,21 @@ public abstract class Sequence implements Iterable<Object> {
         return count;
     }
 
+    // TODO: rename to prepend?
+    public Sequence cons(Object obj) {
+        return new LinkedList(obj, this);
+    }
+
+    public static Sequence cons(Object obj, Sequence sequence) {
+        if(sequence == null)
+            throw new RuntimeException("Sequence cannot be null");
+        return sequence.cons(obj);
+    }
+
+    public boolean isEmpty() {
+        return false;
+    }
+
     public static Sequence concat(Sequence seqs) {
         ArrayList<Object> forms = new ArrayList<>();
         while(!seqs.isEmpty()) {
@@ -75,8 +71,22 @@ public abstract class Sequence implements Iterable<Object> {
         return new ArraySequence(forms.toArray());
     }
 
-    public final Iterator<Object> iterator() {
-        return new SequenceIterator(this);
+    /**
+     * InvokeDynamic bootstrap method for creating arbitrary length sequences. Returns a CallSite which
+     * packs the number of arguments given in methodType into an ArraySequence
+     * @param lookup Lookup handle given by the InvokeDynamic instruction
+     * @param name Not used
+     * @param methodType Expected type of the CallSite
+     * @return A CallSite for creating new Sequences
+     * @throws IllegalAccessException Should never be thrown as ArraySequence.makeList is public
+     * @throws NoSuchMethodException Should never be thrown as long as ArraySequence.makeList exists
+     */
+    public static CallSite sequenceBuilder(MethodHandles.Lookup lookup, String name, MethodType methodType)
+            throws IllegalAccessException, NoSuchMethodException {
+        int params = methodType.parameterCount();
+        MethodHandle base = lookup.findStatic(ArraySequence.class, "makeList",
+                MethodType.methodType(Sequence.class, Object[].class));
+        return new ConstantCallSite(base.asCollector(Object[].class, params));
     }
 
     // TODO: refactor out to string builder for mixed type sequences
@@ -99,6 +109,10 @@ public abstract class Sequence implements Iterable<Object> {
         }
         builder.append(')');
         return builder.toString();
+    }
+
+    public final Iterator<Object> iterator() {
+        return new SequenceIterator(this);
     }
 
     class SequenceIterator implements Iterator<Object> {

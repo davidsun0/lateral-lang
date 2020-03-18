@@ -5,7 +5,6 @@ import java.util.HashMap;
 
 public class Environment {
     private static HashMap<Symbol, Object> symMap = new HashMap<>();
-    private static DynamicsManager dynamicsManager = new DynamicsManager();
 
     public static Object insert(Symbol symbol, Object obj) {
         symMap.put(symbol, obj);
@@ -23,26 +22,47 @@ public class Environment {
         return symMap.get(symbol);
     }
 
+    /**
+     * The Environmental InvokeDynamic bootstrap method.
+     * Finds a function by name and returns a CallSite to invoke said function.
+     * @param lookup The lookup handle from the invokedynamic instruction
+     * @param dynamicName The string name of the function to be called
+     * @param dynamicType The expected method type of the function
+     * @param envirName To be implemented: the name of the environment that contains the function
+     * @return A CallSite representing the function invocation
+     * @throws NoSuchMethodException If the requested function does not exist or cannot be applied with the
+     * given method signature
+     * TODO UnsupportedOperationException ?
+     * @throws IllegalAccessException Should not be thrown under normal conditions.
+     * Occurs when the function invocation cannot be accessed by the requesting instruction.
+     * e.g. the method is private or owned by the wrong ClassLoader
+     */
     public static CallSite bootstrapMethod(
             MethodHandles.Lookup lookup, String dynamicName, MethodType dynamicType,
-            String envirName
-    ) throws Throwable {
+            String envirName) throws NoSuchMethodException, IllegalAccessException {
         // TODO: look up specific environment with envirName
-        // TODO: check that function exists
-        // TODO: fallback for method selection: exact args -> varargs -> generic (?) -> error
-        Function target = (Function) symMap.get(Symbol.makeSymbol(dynamicName));
-        if(target == null) {
-            throw new RuntimeException("function " + dynamicName + " does not exist");
-        } else if(target.isVarargs()) {
+        Symbol name = Symbol.makeSymbol(dynamicName);
+        if(!symMap.containsKey(name)) {
+            throw new NoSuchMethodException("function " + dynamicName + " does not exist");
+        } else if(!(symMap.get(name) instanceof Function)) {
+            throw new TypeException(symMap.get(name) + " can't be used as a function");
+        }
+
+        // TODO: function fallbacks: invoke (static) -> invoke (virtual) -> apply -> NoSuchMethod
+        Function function = (Function) symMap.get(Symbol.makeSymbol(dynamicName));
+        MethodHandle result;
+        if(function.isVarargs()) {
             int given = dynamicType.parameterCount();
-            int expected = target.paramCount();
+            int expected = function.paramCount();
             Class<?>[] paramClasses = Assembler.getParameterClasses(expected);
             paramClasses[paramClasses.length - 1] = Sequence.class;
+            // paramClasses[0] = function.getClass();
 
             // the actual method to be called
-            MethodHandle source = lookup.findStatic(target.getClass(), "invokeStatic",
+            MethodHandle base = lookup.findVirtual(function.getClass(), "invoke",
                     MethodType.methodType(Object.class, paramClasses));
-
+            // MethodHandle withFun = MethodHandles.insertArguments(base, 0, function);
+            MethodHandle withFun = base.bindTo(function);
             /*
             asCollector collects (given - expected + 1) arguments into an Array
             the array is fed into ArraySequence.makeList, which returns the varargs as a single Sequence
@@ -55,13 +75,13 @@ public class Environment {
              all but the first expected - 1 arguments are fed into the makelist described above
              This effectively combines the two MethodHandles into one with automatic varargs to Sequence collection
               */
-            MethodHandle x = MethodHandles.collectArguments(source, expected - 1, makelist);
-            return new ConstantCallSite(x);
+            MethodHandle temp = MethodHandles.collectArguments(withFun, expected - 1, makelist);
+            result = temp;
         } else {
-            MethodHandle mh = lookup.findStatic(target.getClass(), "invokeStatic", dynamicType);
-            return new ConstantCallSite(mh);
+            result = lookup.findVirtual(function.getClass(), "invoke", dynamicType).bindTo(function);
         }
         // TODO: convert to MutableCallSite to allow for redefinition
         // TODO: bind MutableCallSite to object? Can one object have multiple callsites?
+        return new ConstantCallSite(result);
     }
 }
