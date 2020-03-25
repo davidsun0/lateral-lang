@@ -119,7 +119,7 @@ public class LispReader {
             form = readForm();
             if(form != null && form.equals(')')) {
                 // end of list
-                return ArraySequence.makeList(forms.toArray());
+                return Sequence.makeList(forms.toArray());
             } else {
                 forms.add(form);
             }
@@ -144,15 +144,15 @@ public class LispReader {
         if(c == '"') {
             return consumeString();
         } else if(c == '\'') {
-            return LinkedList.makeList(QUOTE, readForm());
+            return Sequence.makeList(QUOTE, readForm());
         } else if(c == '`') {
             return readQuasiQuote();
         } else if(c == ',') {
             if(hasNextChar() && peekChar() == '@') {
                 nextChar(); // consume '@'
-                return LinkedList.makeList(UNQUOTE_SPLICING, readForm());
+                return Sequence.makeList(UNQUOTE_SPLICING, readForm());
             } else {
-                return LinkedList.makeList(UNQUOTE, readForm());
+                return Sequence.makeList(UNQUOTE, readForm());
             }
         }
         // reader macros here
@@ -198,21 +198,21 @@ public class LispReader {
                 Sequence inner = (Sequence) head;
                 if (inner.first().equals(QUOTE)) {
                     // `(... (quote x) ...) -> (concat ... (list (quote (quote x))) ...)
-                    forms.add(LinkedList.makeList(LIST, inner));
+                    forms.add(Sequence.makeList(LIST, inner));
                 } else if (inner.first().equals(UNQUOTE_SPLICING)) {
                     // `(... (uqs (a b c)) ...) -> (concat ... (a b c) ...)
                     // inner.first() is "unquote-splcing", inner.second() is the inner body
                     forms.add(inner.second());
                 } else if (inner.first().equals(UNQUOTE)) {
                     // `(... (unquote x) ...) -> (concat ... (list x) ...)
-                    forms.add(LinkedList.makeList(LIST, inner.second()));
+                    forms.add(Sequence.makeList(LIST, inner.second()));
                 } else {
                     // `(... (a b c) ...) -> (concat ... (list (concat ~expand a b c~)) ...)
-                    forms.add(LinkedList.makeList(LIST, quasiQuoteHelper(inner)));
+                    forms.add(Sequence.makeList(LIST, quasiQuoteHelper(inner)));
                 }
             } else {
                 // `(... x ...) -> (concat ... (list (quote x)) ...)
-                forms.add(LinkedList.makeList(LIST, LinkedList.makeList(QUOTE, head)));
+                forms.add(Sequence.makeList(LIST, Sequence.makeList(QUOTE, head)));
             }
             list = list.rest();
         }
@@ -234,7 +234,7 @@ public class LispReader {
             }
         } else {
             // simple form is just quoted since it can't contain unquotes
-            return LinkedList.makeList(QUOTE, quoteBody);
+            return Sequence.makeList(QUOTE, quoteBody);
         }
     }
 

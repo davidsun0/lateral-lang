@@ -51,13 +51,13 @@ public class Compiler {
             "makeKeyword", Assembler.getMethodDescriptor(String.class, Keyword.class)
     );
 
-    private static Sequence ENVIR_BOOTSTRAP = new ArraySequence(
-            Type.getInternalName(Environment.class), "bootstrapMethod",
+    static Sequence ENVIR_BOOTSTRAP = new ArraySequence(
+            Type.getInternalName(Environment.class), "dynamicMethod",
             MethodType.methodType(CallSite.class, MethodHandles.Lookup.class, String.class,
                                 MethodType.class, String.class).toMethodDescriptorString()
     );
 
-    private static Sequence SEQUENCE_BOOTSTRAP = new ArraySequence(
+    static Sequence SEQUENCE_BOOTSTRAP = new ArraySequence(
             Type.getInternalName(Sequence.class), "sequenceBuilder",
             MethodType.methodType(CallSite.class, MethodHandles.Lookup.class, String.class,
                                 MethodType.class).toMethodDescriptorString()
@@ -76,9 +76,9 @@ public class Compiler {
             if(resource instanceof Function && ((Function) resource).isMacro()) {
                 Function macro = (Function) resource;
                 Object[] args = new Object[macro.paramCount()];
+                // ignore the first arg, which is the macro name
                 Sequence argSeq = ((Sequence) expr).rest();
                 for(int i = 0; i < args.length; i ++) {
-                    // ignore the first arg, which is the macro name
                     args[i] = argSeq.first();
                     argSeq = argSeq.rest();
                 }
@@ -103,23 +103,23 @@ public class Compiler {
             }
             Class<?>[] methodClasses = Assembler.getParameterClasses(seqLen + 1);
             methodClasses[methodClasses.length - 1] = Sequence.class;
-            opcodes.add(ArraySequence.makeList(
+            opcodes.add(Sequence.makeList(
                     Assembler.INVOKEDYNAMIC,
                     SEQUENCE_BOOTSTRAP,
                     "makeSequence",
                     Assembler.getMethodDescriptor(methodClasses)
             ));
         } else if (ast instanceof Symbol) {
-            opcodes.add(ArraySequence.makeList(LDC, ast.toString()));
+            opcodes.add(Sequence.makeList(LDC, ast.toString()));
             opcodes.add(MAKE_SYM);
         } else if (ast instanceof Keyword) {
-            opcodes.add(ArraySequence.makeList(LDC, ((Keyword) ast).getValue()));
+            opcodes.add(Sequence.makeList(LDC, ((Keyword) ast).getValue()));
             opcodes.add(MAKE_KEY);
         } else if (ast instanceof Integer) {
-            opcodes.add(ArraySequence.makeList(ICONST, ast));
+            opcodes.add(Sequence.makeList(ICONST, ast));
             opcodes.add(PARSE_INT);
         } else if (ast instanceof String) {
-            opcodes.add(ArraySequence.makeList(LDC, ast));
+            opcodes.add(Sequence.makeList(LDC, ast));
         } else {
             throw new RuntimeException("Can't quote " + ast);
         }
@@ -175,7 +175,7 @@ public class Compiler {
                         localIndex = locals.size() - 1;
                     }
                     compile(opExprs, bindList.second(), locals, false);
-                    opExprs.add(ArraySequence.makeList(Assembler.ASTORE, localIndex));
+                    opExprs.add(Sequence.makeList(Assembler.ASTORE, localIndex));
                     bindList = bindList.rest().rest();
                 }
                 Object letBody = body.second();
@@ -188,7 +188,7 @@ public class Compiler {
                 }
                 Class<?>[] methodClasses = Assembler.getParameterClasses(body.length() + 1);
                 methodClasses[methodClasses.length - 1] = Sequence.class;
-                opExprs.add(ArraySequence.makeList(
+                opExprs.add(Sequence.makeList(
                         Assembler.INVOKEDYNAMIC,
                         SEQUENCE_BOOTSTRAP,
                         "makeSequence",
@@ -206,7 +206,7 @@ public class Compiler {
                     use invokedynamic to get function at runtime
                     see Environment.bootstrapMethod
                      */
-                    opExprs.add(ArraySequence.makeList(
+                    opExprs.add(Sequence.makeList(
                             Assembler.INVOKEDYNAMIC,
                             ENVIR_BOOTSTRAP,
                             head.toString(),
@@ -238,19 +238,19 @@ public class Compiler {
             }
             // symbol exists in locals / environment
             if (index >= 0) {
-                opExprs.add(ArraySequence.makeList(Assembler.ALOAD, index));
+                opExprs.add(Sequence.makeList(Assembler.ALOAD, index));
             } else {
                 // TODO: look up in closure environment, then global environment
                 throw new RuntimeException(ast.toString());
             }
         } else if(ast instanceof Keyword) {
-            opExprs.add(ArraySequence.makeList(Assembler.LDC, ((Keyword) ast).getValue()));
+            opExprs.add(Sequence.makeList(Assembler.LDC, ((Keyword) ast).getValue()));
             opExprs.add(MAKE_KEY);
         } else if(ast instanceof Integer) {
-            opExprs.add(ArraySequence.makeList(ICONST, ast));
+            opExprs.add(Sequence.makeList(ICONST, ast));
             opExprs.add(PARSE_INT);
         } else if(ast instanceof String) {
-            opExprs.add(ArraySequence.makeList(LDC, ast));
+            opExprs.add(Sequence.makeList(LDC, ast));
         } else {
             throw new RuntimeException(ast.toString());
         }
@@ -287,6 +287,10 @@ public class Compiler {
                         isMacro, isVarargs, opcodes, name.toString(), paramCount
                 );
                 return Environment.insert(name, function);
+            } else if(astSequence.first().equals(DEFINE)) {
+                Symbol name = (Symbol) astSequence.second();
+                Object value = astSequence.third();
+                return Environment.insert(name, eval(value));
             }
         }
         ArrayList<Symbol> locals = new ArrayList<>();

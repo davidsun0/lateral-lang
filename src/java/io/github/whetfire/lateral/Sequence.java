@@ -13,35 +13,26 @@ public abstract class Sequence implements Iterable<Object> {
 
     public abstract Object first();
 
-    abstract public Object second();
-
-    abstract public Object third();
-
-    abstract public Object fourth();
-
     public abstract Sequence rest();
 
-    public Object nth(int n) {
-        Sequence sequence = this;
-        for(int i = 0; i < n; i ++) {
-            sequence = sequence.rest();
-        }
-        return sequence.first();
-    }
+    public abstract Object nth(int n);
 
-    public int length() {
-        Sequence sequence = this;
-        int count = 0;
-        while(!sequence.isEmpty()) {
-            sequence = sequence.rest();
-            count ++;
-        }
-        return count;
-    }
+    public abstract int length();
 
     // TODO: rename to prepend?
     public Sequence cons(Object obj) {
         return new LinkedList(obj, this);
+    }
+
+    public Object second() {
+        return nth(1);
+    }
+
+    public Object third() {
+        return nth(2);
+    }
+    public Object fourth() {
+        return nth(3);
     }
 
     public static Sequence cons(Object obj, Sequence sequence) {
@@ -69,6 +60,13 @@ public abstract class Sequence implements Iterable<Object> {
             seqs = seqs.rest();
         }
         return new ArraySequence(forms.toArray());
+    }
+
+    public static Sequence makeList(Object ... values) {
+        if(values == null || values.length == 0)
+            return EmptySequence.EMPTY_SEQUENCE;
+        else
+            return new ArraySequence(values);
     }
 
     /**
@@ -115,7 +113,7 @@ public abstract class Sequence implements Iterable<Object> {
         return new SequenceIterator(this);
     }
 
-    class SequenceIterator implements Iterator<Object> {
+    static class SequenceIterator implements Iterator<Object> {
         private Sequence sequence;
 
         SequenceIterator(Sequence sequence) {

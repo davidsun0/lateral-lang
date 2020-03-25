@@ -9,24 +9,16 @@ final public class EmptySequence extends Sequence {
         return null;
     }
 
-    public Object second() {
-        return null;
-    }
-
-    public Object third() {
-        return null;
-    }
-
-    public Object fourth() {
-        return null;
+    public Sequence rest() {
+        return this;
     }
 
     public Object nth(int n) {
         return null;
     }
 
-    public Sequence rest() {
-        return this;
+    public int length() {
+        return 0;
     }
 
     public boolean equals(Object obj) {

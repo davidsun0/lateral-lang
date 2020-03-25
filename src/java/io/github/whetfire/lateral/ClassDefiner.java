@@ -19,4 +19,19 @@ public class ClassDefiner extends ClassLoader {
     public static Class<?> hotload(byte[] classBytes) {
         return new ClassDefiner().loadClass(classBytes);
     }
+
+    /**
+     * Hotload multiple related classes at once. All classes are loaded by the same ClassDefiner.
+     * The class represented the first element of classBytes is returned.
+     * @param classBytes
+     * @return
+     */
+    public static Class<?> hotloadClasses(byte[][] classBytes) {
+        ClassDefiner classDefiner = new ClassDefiner();
+        Class<?> topLevel = classDefiner.loadClass(classBytes[0]);
+        for(int i = 1; i < classBytes.length; i ++) {
+            classDefiner.loadClass(classBytes[i]);
+        }
+        return topLevel;
+    }
 }

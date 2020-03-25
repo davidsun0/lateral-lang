@@ -58,3 +58,6 @@
 (dec 1234)
 
 (cons "abc" '())
+
+(define LinkedList "io/github/whetfire/lateral/LinkedList")
+LinkedList

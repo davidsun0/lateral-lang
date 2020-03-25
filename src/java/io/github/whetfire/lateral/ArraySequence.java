@@ -25,45 +25,8 @@ public class ArraySequence extends Sequence {
         this.next = next;
     }
 
-    public static Sequence makeList(int index, Object ... values) {
-        if(index == values.length) {
-            return EmptySequence.EMPTY_SEQUENCE;
-        } else if (index < values.length) {
-            return new ArraySequence(values, index);
-        } else {
-            throw new RuntimeException("invalid ArraySequence");
-        }
-    }
-
-    public static Sequence makeList(Object ... values) {
-        if(values == null || values.length == 0)
-            return EmptySequence.EMPTY_SEQUENCE;
-        else
-            return new ArraySequence(values);
-    }
-
     public Object first() {
         return values[index];
-    }
-
-    public Object second() {
-        return nth(1);
-    }
-
-    public Object third() {
-        return nth(2);
-    }
-
-    public Object fourth() {
-        return nth(3);
-    }
-
-    public Object nth(int n) {
-        if(index + n < values.length) {
-            return values[index + n];
-        } else {
-            return next.nth(n - (values.length - index));
-        }
     }
 
     public Sequence rest() {
@@ -71,6 +34,14 @@ public class ArraySequence extends Sequence {
             return next;
         } else {
             return new ArraySequence(values, index + 1, next);
+        }
+    }
+
+    public Object nth(int n) {
+        if(index + n < values.length) {
+            return values[index + n];
+        } else {
+            return next.nth(n - (values.length - index));
         }
     }
 

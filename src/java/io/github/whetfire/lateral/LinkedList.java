@@ -23,27 +23,25 @@ public class LinkedList extends Sequence {
         return value;
     }
 
-    public Object second() {
-        return next.first();
-    }
-
-    public Object third() {
-        return rest().second();
-    }
-
-    public Object fourth() {
-        return rest().third();
-    }
-
     public Sequence rest() {
         return next;
     }
 
-    public static Sequence makeList(Object ... values) {
-        Sequence res = EmptySequence.EMPTY_SEQUENCE;
-        for (int i = values.length - 1; i >= 0; i--) {
-            res = new LinkedList(values[i], res);
+    public Object nth(int n) {
+        Sequence sequence = this;
+        for(int i = 0; i < n; i ++) {
+            sequence = sequence.rest();
         }
-        return res;
+        return sequence.first();
+    }
+
+    public int length() {
+        Sequence sequence = this;
+        int count = 0;
+        while(!sequence.isEmpty()) {
+            sequence = sequence.rest();
+            count ++;
+        }
+        return count;
     }
 }

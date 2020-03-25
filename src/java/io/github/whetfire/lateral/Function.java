@@ -27,10 +27,6 @@ abstract public class Function {
      */
     abstract public Object apply(Object ... args);
 
-    static public Object apply(Function function, Object ... args) {
-        return function.apply(args);
-    }
-
     public String toString() {
         return "<function>";
     }
