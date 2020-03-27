@@ -1,17 +1,17 @@
 package io.github.whetfire.lateral;
 
 public final class Keyword {
-    private final String name;
+    private final String value;
     private final int hash;
 
-    private Keyword(String name) {
-        this.name = name;
-        hash = name.hashCode();
+    private Keyword(String value) {
+        this.value = value;
+        hash = value.hashCode();
     }
 
-    public static Keyword makeKeyword(String name) {
+    public static Keyword makeKeyword(String value) {
         // TODO: Keyword interning
-        return new Keyword(name);
+        return new Keyword(value);
     }
 
     public int hashCode() {
@@ -22,15 +22,17 @@ public final class Keyword {
         if(obj == this) {
             return true;
         } else {
-            return obj instanceof Keyword && hash == ((Keyword) obj).hash;
+            return obj instanceof Keyword
+                    && hash == ((Keyword) obj).hash
+                    && value.equals(((Keyword) obj).value);
         }
     }
 
     public String getValue() {
-        return name;
+        return value;
     }
 
     public String toString() {
-        return ":" + name;
+        return ":" + value;
     }
 }

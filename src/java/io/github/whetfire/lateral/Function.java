@@ -28,6 +28,6 @@ abstract public class Function {
     abstract public Object apply(Object ... args);
 
     public String toString() {
-        return "<function>";
+        return "#<function>";
     }
 }

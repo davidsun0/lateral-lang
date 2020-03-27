@@ -12,27 +12,28 @@ import java.util.Iterator;
 public abstract class Sequence implements Iterable<Object> {
 
     public abstract Object first();
-
     public abstract Sequence rest();
 
+    // TODO: add mutators and copy on write ImmutableSequence
+    // public abstract Object setFirst(Object object);
+    // public abstract Sequence setRest(Sequence sequence);
+    // ImmutableSequence would necessitate a copy method
+
     public abstract Object nth(int n);
-
     public abstract int length();
-
-    // TODO: rename to prepend?
-    public Sequence cons(Object obj) {
-        return new LinkedList(obj, this);
-    }
-
     public Object second() {
         return nth(1);
     }
-
     public Object third() {
         return nth(2);
     }
     public Object fourth() {
         return nth(3);
+    }
+
+    // TODO: rename to prepend?
+    public Sequence cons(Object obj) {
+        return new LinkedList(obj, this);
     }
 
     public static Sequence cons(Object obj, Sequence sequence) {

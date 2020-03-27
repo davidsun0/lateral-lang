@@ -4,10 +4,29 @@ import java.lang.invoke.*;
 import java.util.HashMap;
 
 public class Environment {
+    private static class ValueAndCall {
+        Object value;
+        CallSite asObject;
+        CallSite asFunction;
+
+        ValueAndCall(CallSite asObject, CallSite asFunction) {
+            this.asObject = asObject;
+            this.asFunction = asFunction;
+        }
+
+        CallSite getFunction(MethodType methodType) {
+            return null;
+        }
+    }
+
     private static HashMap<Symbol, Object> symMap = new HashMap<>();
+    private static HashMap<Symbol, ValueAndCall> callSiteMap = new HashMap<>();
 
     public static Object insert(Symbol symbol, Object obj) {
         symMap.put(symbol, obj);
+        // create two MethodHandles
+        // replace if exists
+        // else make MutableCallSite
         return obj;
     }
 
@@ -49,47 +68,51 @@ public class Environment {
      * Occurs when the function invocation cannot be accessed by the requesting instruction.
      * e.g. the method is private or owned by the wrong ClassLoader
      */
-    public static CallSite dynamicMethod(
+    public static CallSite dynamicFunction(
             MethodHandles.Lookup lookup, String dynamicName, MethodType dynamicType,
             String namespace) throws NoSuchMethodException, IllegalAccessException {
         // TODO: look up specific environment with envirName
         Symbol name = Symbol.makeSymbol(dynamicName);
-        if(!symMap.containsKey(name)) {
-            throw new NoSuchMethodException("function " + dynamicName + " does not exist");
-        } else if(!(symMap.get(name) instanceof Function)) {
-            throw new TypeException(symMap.get(name) + " can't be used as a function");
-        }
-
-        // TODO: function fallbacks: invoke (static) -> invoke (virtual) -> apply -> NoSuchMethod
-        Function function = (Function) symMap.get(Symbol.makeSymbol(dynamicName));
+        // TODO: store MutableCallSite even if function lookup fails, because it might change in the future
         MethodHandle result;
-        if(function.isVarargs()) {
-            int given = dynamicType.parameterCount();
-            int expected = function.paramCount();
-            Class<?>[] paramClasses = Assembler.getParameterClasses(expected);
-            paramClasses[paramClasses.length - 1] = Sequence.class;
-            // paramClasses[0] = function.getClass();
-
-            // the actual method to be called
-            MethodHandle base = lookup.findVirtual(function.getClass(), "invoke",
-                    MethodType.methodType(Object.class, paramClasses));
-            // MethodHandle withFun = MethodHandles.insertArguments(base, 0, function);
-            MethodHandle withFun = base.bindTo(function);
-            /*
-            asCollector collects (given - expected + 1) arguments into an Array
-            the array is fed into ArraySequence.makeList, which returns the varargs as a single Sequence
-             */
-            MethodHandle makelist = lookup.findStatic(ArraySequence.class, "makeList",
-                    MethodType.methodType(Sequence.class, Object[].class)
-            ).asCollector(Object[].class, given - expected + 1);
-
-            /*
-             all but the first expected - 1 arguments are fed into the makelist described above
-             This effectively combines the two MethodHandles into one with automatic varargs to Sequence collection
-             */
-            result = MethodHandles.collectArguments(withFun, expected - 1, makelist);
+        if(!symMap.containsKey(name)) {
+            result = MethodHandles.dropArguments(
+                    MethodHandles.throwException(Object.class, NoSuchMethodException.class)
+                    .bindTo(new NoSuchMethodException("function " + dynamicName + " does not exist")),
+                    0, dynamicType.parameterList());
+        } else if(!(symMap.get(name) instanceof Function)) {
+            result = MethodHandles.dropArguments(
+                    MethodHandles.throwException(Object.class, TypeException.class)
+                            .bindTo(new TypeException(symMap.get(name) + " can't be used as a function")),
+                    0, dynamicType.parameterList());
         } else {
-            result = lookup.findVirtual(function.getClass(), "invoke", dynamicType).bindTo(function);
+            // TODO: function fallbacks: invoke (static) -> invoke (virtual) -> apply -> NoSuchMethod
+            // TODO: assert that function is not macro
+            Function function = (Function) symMap.get(Symbol.makeSymbol(dynamicName));
+            if (function.isVarargs()) {
+                int given = dynamicType.parameterCount();
+                int expected = function.paramCount();
+                Class<?>[] paramClasses = Assembler.getParameterClasses(expected);
+                paramClasses[paramClasses.length - 1] = Sequence.class;
+
+                // the actual method to be called
+                MethodHandle base = lookup.findVirtual(function.getClass(), "invoke",
+                        MethodType.methodType(Object.class, paramClasses)).bindTo(function);
+                /*
+                asCollector collects (given - expected + 1) arguments into an Array
+                the array is fed into ArraySequence.makeList, which returns the varargs as a single Sequence
+                 */
+                MethodHandle makelist = lookup.findStatic(ArraySequence.class, "makeList",
+                        MethodType.methodType(Sequence.class, Object[].class)
+                ).asCollector(Object[].class, given - expected + 1);
+                /*
+                 all but the first expected - 1 arguments are fed into the makelist described above
+                 This effectively combines the two MethodHandles into one with automatic varargs to Sequence collection
+                 */
+                result = MethodHandles.collectArguments(base, expected - 1, makelist);
+            } else {
+                result = lookup.findVirtual(function.getClass(), "invoke", dynamicType).bindTo(function);
+            }
         }
         // TODO: convert to MutableCallSite to allow for redefinition
         // TODO: bind MutableCallSite to object? Can one object have multiple callsites?

@@ -32,8 +32,9 @@ public final class Symbol {
     public boolean equals(Object obj) {
         if(obj == this)
             return true;
-        else
-            return obj instanceof Symbol && hash == ((Symbol) obj).hash;
+            return obj instanceof Symbol
+                    && hash == ((Symbol) obj).hash
+                    && value.equals(((Symbol) obj).value);
     }
 
     public String toString() {

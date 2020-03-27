@@ -1,13 +1,7 @@
 package io.github.whetfire.lateral;
 
 import org.objectweb.asm.*;
-import org.objectweb.asm.util.CheckClassAdapter;
 
-import java.io.PrintWriter;
-import java.lang.invoke.MethodType;
-import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -42,13 +36,13 @@ public class Assembler {
     static Keyword INVOKEDYNAMIC = Keyword.makeKeyword("invokedynamic");
 
     static Keyword IF_ICMPNE = Keyword.makeKeyword("if_icmpne");
+    static Keyword IFNULL = Keyword.makeKeyword("ifnull");
 
     static Keyword GETSTATIC = Keyword.makeKeyword("getstatic");
     static Keyword PUTSTATIC = Keyword.makeKeyword("putstatic");
     static Keyword GETFIELD = Keyword.makeKeyword("getfield");
     static Keyword PUTFIELD = Keyword.makeKeyword("putfield");
 
-    // TODO: convert to immutable map with Map.of
     private static Map<Keyword, Integer> simpleOpMap;
     private static Map<Keyword, Integer> jumpOpMap;
     private static Map<Keyword, Integer> opMap;
@@ -72,7 +66,7 @@ public class Assembler {
         );
 
         jumpOpMap = Map.ofEntries(
-            Map.entry(Keyword.makeKeyword("ifnull"), Opcodes.IFNULL),
+            Map.entry(IFNULL, Opcodes.IFNULL),
             Map.entry(Keyword.makeKeyword("ifnonnull"), Opcodes.IFNULL),
             Map.entry(Keyword.makeKeyword("ifne"), Opcodes.IFNE),
             Map.entry(Keyword.makeKeyword("ifeq"), Opcodes.IFEQ),
@@ -98,8 +92,6 @@ public class Assembler {
         );
     }
 
-    private static int classNum = 0;
-
     static Class<?>[] getParameterClasses(int count) {
         Class<?>[] classes = new Class[count];
         for(int i = 0; i < count; i ++) {
@@ -121,145 +113,18 @@ public class Assembler {
         return sb.toString();
     }
 
-    static void visitEmptyConstructor(ClassWriter classWriter) {
-        MethodVisitor mv = classWriter.visitMethod(Opcodes.ACC_PUBLIC,
-                "<init>", "()V", null, null);
-        mv.visitCode();
-        mv.visitVarInsn(Opcodes.ALOAD, 0);
-        mv.visitMethodInsn(Opcodes.INVOKESPECIAL, Type.getInternalName(Function.class),
-                "<init>","()V", false);
-        mv.visitInsn(Opcodes.RETURN);
-        mv.visitMaxs(1, 1);
-        mv.visitEnd();
-    }
-
-    static void visitCapturingConstructor(ClassWriter classWriter, ArrayList<Symbol> symbols) {
-
-    }
-
-    static void visitToString(ClassWriter classWriter, String string) {
-        MethodVisitor mv = classWriter.visitMethod(Opcodes.ACC_PUBLIC,
-                "toString", "()Ljava/lang/String;", null, null);
-        mv.visitCode();
-        mv.visitLdcInsn(string);
-        mv.visitInsn(Opcodes.ARETURN);
-        mv.visitMaxs(1, 1);
-        mv.visitEnd();
-    }
-
-    static void visitApplier(ClassWriter classWriter, String className,
-                             String invokeDescriptor, int paramCount, boolean isVarargs) {
-        /*
-        Object apply(Object .. args) {
-            if(args.length == n)
-                invoke(args[0] ... args[n]);
-            else
-                throw new RuntimeException();
+    static String getMethodDescriptor(Class<?> returnType, int count) {
+        StringBuilder sb = new StringBuilder();
+        sb.append('(');
+        for(int i = 0; i < count; i ++) {
+            sb.append(Type.getDescriptor(Object.class));
         }
-         */
-        /*
-        // for varargs
-        if(args.length >= n - 1)
-            invoke(args[0] ... ArraySequence.makeList(n-1, args));
-         */
-        MethodVisitor mv = classWriter.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_VARARGS,
-                "apply", "([Ljava/lang/Object;)Ljava/lang/Object;", null, null);
-        mv.visitCode();
-        Label excep = new Label(); // when throwing exceptions
-
-        // if(args.length == n)
-        // local variable 0
-        mv.visitVarInsn(Opcodes.ALOAD, 1);
-        mv.visitInsn(Opcodes.ARRAYLENGTH);
-        // TODO: optimization when paramCount < 4
-        if(isVarargs) {
-            mv.visitLdcInsn(paramCount - 1);
-            mv.visitJumpInsn(Opcodes.IF_ICMPLT, excep);
-        } else {
-            mv.visitLdcInsn(paramCount);
-            mv.visitJumpInsn(Opcodes.IF_ICMPNE, excep);
-        }
-
-        //      this.invoke(args[0] ... args[n]);
-        // load "this" from args
-        mv.visitVarInsn(Opcodes.ALOAD, 0);
-        // load paramCount elements from the argument array
-        for(int i = 0; i < paramCount - 1; i ++) {
-            mv.visitVarInsn(Opcodes.ALOAD, 1);
-            mv.visitLdcInsn(i);
-            mv.visitInsn(Opcodes.AALOAD);
-        }
-
-        if(paramCount > 0) {
-            if (isVarargs) {
-                mv.visitLdcInsn(paramCount);
-                mv.visitVarInsn(Opcodes.ALOAD, 1);
-                mv.visitMethodInsn(Opcodes.INVOKESTATIC,
-                        Type.getInternalName(ArraySequence.class),
-                        "makeList",
-                        MethodType.methodType(Sequence.class, int.class, Object[].class).toMethodDescriptorString(),
-                        false);
-            } else {
-                mv.visitVarInsn(Opcodes.ALOAD, 1);
-                mv.visitLdcInsn(paramCount - 1);
-                mv.visitInsn(Opcodes.AALOAD);
-            }
-        }
-        // param count + 1 for return type, all of Object.class
-        Class<?>[] classes = getParameterClasses(paramCount + 1);
-        if(isVarargs)
-            classes[classes.length - 2] = Sequence.class;
-        String descriptor = getMethodDescriptor(classes);
-        mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, className, "invoke", descriptor, false);
-        mv.visitInsn(Opcodes.ARETURN);
-
-        // else
-        //      throw new RuntimeException();
-        mv.visitLabel(excep);
-        mv.visitTypeInsn(Opcodes.NEW, Type.getInternalName(UnsupportedOperationException.class));
-        mv.visitInsn(Opcodes.DUP);
-        mv.visitMethodInsn(Opcodes.INVOKESPECIAL,
-                Type.getInternalName(UnsupportedOperationException.class),
-                "<init>",
-                "()V",
-                false
-        );
-        mv.visitInsn(Opcodes.ATHROW);
-        mv.visitMaxs(paramCount + 2, 1);
-        mv.visitEnd();
+        sb.append(')');
+        sb.append(Type.getDescriptor(returnType));
+        return sb.toString();
     }
 
-    /**
-     * Generates a virtual method which returns a constant boolean value
-     * @param classWriter The class to which the method belongs
-     * @param name The name of the method
-     * @param value The constant value to return
-     */
-    static void visitReturnBoolean(ClassWriter classWriter, String name, boolean value) {
-        MethodVisitor mv = classWriter.visitMethod(Opcodes.ACC_PUBLIC,
-                name, "()Z", null, null);
-        mv.visitCode();
-        mv.visitInsn(value ? Opcodes.ICONST_1 : Opcodes.ICONST_0);
-        mv.visitInsn(Opcodes.IRETURN);
-        mv.visitMaxs(1, 1);
-        mv.visitEnd();
-    }
-
-    static void visitParamCount(ClassWriter classWriter, int paramc) {
-        MethodVisitor mv = classWriter.visitMethod(Opcodes.ACC_PUBLIC,
-                "paramCount", "()I", null, null);
-        mv.visitCode();
-        if (paramc <= 4) {
-            mv.visitInsn(Opcodes.ICONST_0 + paramc);
-        } else {
-            mv.visitLdcInsn(paramc);
-        }
-        mv.visitInsn(Opcodes.IRETURN);
-        mv.visitMaxs(1, 0);
-        mv.visitEnd();
-    }
-
-    static void visitOpCodes(MethodVisitor mv, Iterable<Object> opcodes) {
+    private static void visitOpCodes(MethodVisitor mv, Iterable<Object> opcodes) {
         HashMap<Symbol, Label> labelMap = new HashMap<>();
         for(Object opcode : opcodes) {
             // System.out.println(opcode);
@@ -295,7 +160,6 @@ public class Assembler {
                             (String) body.third(),
                             INVOKEINTERFACE.equals(head));
                 } else if(INVOKEDYNAMIC.equals(head)) {
-                    // contain the handle information in the invokedynamic ir?
                     // (:invokedynamic (handle-class handle-name handle-type) dyn-name dyn-type bsma ...)
                     Sequence handleArgs = (Sequence) body.first();
                     Handle dynamicHandle = new Handle(
@@ -351,56 +215,67 @@ public class Assembler {
         }
     }
 
-    static Function compileMethod(boolean isMacro, boolean isVarargs, ArrayList<Object> opcodes, String name, int argc) {
-
-        // let ASM library compute method frames and max values
+    /**
+     * Converts a tree representing a JVM class into the byte array representation of the class
+     * @param asmTree Sequence based tree
+     * @return byte array representation of the asmTree class
+     */
+    static byte[] buildClass(Sequence asmTree) {
         ClassWriter classWriter = new ClassWriter(ClassWriter.COMPUTE_FRAMES + ClassWriter.COMPUTE_MAXS);
-        //ClassWriter classWriter = new ClassWriter(0);
-        // signature:  typed class for generics, e.g. ArrayList<String>. null for none
-        // superName:  parent class
-        // interfaces: null for none
-        String className = "AnonFunc" + (classNum ++);
-        classWriter.visit(JAVA_VERSION, Opcodes.ACC_PUBLIC, className, null,
+        // TODO: assert first arguments match expected
+        // first is defclass
+        String name = (String) asmTree.second();
+        // TODO: get meta
+        Sequence meta = (Sequence) asmTree.third();
+
+        classWriter.visit(JAVA_VERSION, Opcodes.ACC_PUBLIC, name, null,
                 Type.getInternalName(Function.class), null);
 
-        // generate boilerplate methods
-        visitEmptyConstructor(classWriter);
-        visitToString(classWriter, name);
-        visitReturnBoolean(classWriter, "isMacro", isMacro);
-        visitReturnBoolean(classWriter, "isVarargs", isVarargs);
-        visitParamCount(classWriter, argc);
+        for(int i = 0; i < 3; i ++) {
+            asmTree = asmTree.rest();
+        }
 
-        Class<?>[] methodClasses = getParameterClasses(argc + 1);
-        if(isVarargs)
-            methodClasses[argc - 1] = Sequence.class;
-        String descriptor = getMethodDescriptor(methodClasses);
-        visitApplier(classWriter, className, descriptor, argc, isVarargs);
-        MethodVisitor invoker = classWriter.visitMethod(Opcodes.ACC_PUBLIC,
-                "invoke", descriptor, null, null);
-        invoker.visitCode();
-        visitOpCodes(invoker, opcodes);
-        invoker.visitMaxs(0, argc);
-        invoker.visitEnd();
+        for(Object obj : asmTree) {
+            if(obj instanceof Sequence) {
+                Sequence member = (Sequence) obj;
+                Object head = member.first();
+                if(Compiler.DEFMETHOD.equals(head)) {
+                    //System.out.println(member);
+                    String mname = (String) member.second();
+                    String descriptor = (String) member.third();
+                    // TODO: get meta
+                    Sequence mmeta = (Sequence) member.fourth();
 
-        classWriter.visitEnd();
+                    MethodVisitor mv = classWriter.visitMethod(Opcodes.ACC_PUBLIC, mname, descriptor,
+                            null, null);
+                    for (int i = 0; i < 4; i++) {
+                        member = member.rest();
+                    }
+                    //System.out.println(member);
+                    mv.visitCode();
+                    visitOpCodes(mv, member);
+                    mv.visitMaxs(-1, -1);
+                    mv.visitEnd();
+                } else if(Compiler.DEFFIELD.equals(head)) {
+                    classWriter.visitField(Opcodes.ACC_PUBLIC,
+                            (String) member.second(),
+                            (String) member.third(),
+                            null, null);
+                } else {
+                    // TODO subclass
+                    throw new SyntaxException();
+                }
+            } else {
+                throw new SyntaxException();
+            }
+        }
+
         byte[] classBytes = classWriter.toByteArray();
         /*
-        System.out.println();
         PrintWriter printWriter = new PrintWriter(System.out);
         CheckClassAdapter.verify(new ClassReader(classBytes), true, printWriter);
-        Compiler.writeToFile("Test.class", classBytes);
-        //*/
-        Class<?> clazz = ClassDefiner.hotload(classBytes);
-        try {
-            Constructor<?> constructor = clazz.getConstructor();
-            return (Function) constructor.newInstance();
-        } catch (NoSuchMethodException | IllegalAccessException
-                | InvocationTargetException | InstantiationException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    static Function compileMethod(ArrayList<Object> opcodes) {
-        return compileMethod(false, false, opcodes, "anon", 0);
+        System.out.println("================");
+        // */
+        return classBytes;
     }
 }

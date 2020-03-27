@@ -1,4 +1,4 @@
-(def gensym (lambda ()
+(def gensym (function ()
   (asm-quote (:invokestatic "io/github/whetfire/lateral/Symbol"
                             "gensym"
                             "()Lio/github/whetfire/lateral/Symbol;"))))
@@ -6,10 +6,9 @@
 (gensym)
 (gensym)
 (gensym)
-gensym
 
 (def print
-     (lambda (x)
+     (function (x)
        (asm-quote (:aload 1)
                   :dup
                   (:getstatic "java/lang/System"
@@ -21,10 +20,9 @@ gensym
                                   "(Ljava/lang/Object;)V")
                   :areturn)))
 
-print
 (print 123)
 
-(def + (lambda (a b)
+(def + (function (a b)
   (asm-quote (unquote a)
              (:checkcast "java/lang/Integer")
              (:invokevirtual "java/lang/Integer" "intValue" "()I")
@@ -35,18 +33,28 @@ print
              (:invokestatic "java/lang/Integer" "valueOf" "(I)Ljava/lang/Integer;")
              :areturn)))
 
-(+ 1 2)
+(defun add2 (n)
+  (inc (inc n)))
 
-(def inc (lambda (n) (+ n 1)))
+;(add2 40)
+
+(defun inc (n)
+  (+ n 1))
 
 (inc 999)
 
-(def addn (lambda (n) (lambda (x) (+ x n))))
+;(add2 40)
 
-(def add5 (addn 5))
+(def addn (function (n) (function (x) (+ x n))))
 
-(add5 10)
-
-((lambda (x)
+((function (x)
    (let (x 100)
      (print x))) 123)
+
+(defmacro abc (x)
+  765)
+
+(defun my-list (:rest args)
+  args)
+
+(my-list 1 2 3)
