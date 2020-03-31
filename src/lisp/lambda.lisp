@@ -1,60 +1,95 @@
-(def gensym (function ()
-  (asm-quote (:invokestatic "io/github/whetfire/lateral/Symbol"
-                            "gensym"
-                            "()Lio/github/whetfire/lateral/Symbol;"))))
+;; Language Essentials
 
+(def t (asm-quote (:getstatic "java/lang/Boolean" "TRUE" "Ljava/lang/Boolean;")))
+(def null (asm-quote :aconst_null))
+
+(defun list (:rest lst)
+  lst)
+
+(defun gensym
+   ()       (gensym "gensym")
+   (prefix) (asm-quote (asm-unquote prefix)
+                       (:checkcast "java/lang/String")
+                       (:invokestatic "io/github/whetfire/lateral/Symbol"
+                                      "gensym"
+                                      "(Ljava/lang/String;)Lio/github/whetfire/lateral/Symbol;")))
+
+(gensym "abc")
 (gensym)
-(gensym)
-(gensym)
 
-(def print
-     (function (x)
-       (asm-quote (:aload 1)
-                  :dup
-                  (:getstatic "java/lang/System"
-                              "out"
-                              "Ljava/io/PrintStream;")
-                  :swap
-                  (:invokevirtual "java/io/PrintStream"
-                                  "println"
-                                  "(Ljava/lang/Object;)V")
-                  :areturn)))
+(defun concat (:rest lst)
+  (asm-quote (asm-unquote lst)
+             (:checkcast "io/github/whetfire/lateral/Sequence")
+             (:invokestatic "io/github/whetfire/lateral/Sequence"
+                            "concat"
+                            "(Lio/github/whetfire/lateral/Sequence;)Lio/github/whetfire/lateral/Sequence;")))
 
-(print 123)
+;; Core Language Functions
 
-(def + (function (a b)
-  (asm-quote (unquote a)
+(defun print (x)
+  (asm-quote (asm-unquote x)
+             :dup
+             (:getstatic "java/lang/System" "out" "Ljava/io/PrintStream;")
+             :swap
+             (:invokevirtual "java/io/PrintStream" "println" "(Ljava/lang/Object;)V")))
+
+(defun + (a b)
+  (asm-quote (asm-unquote a)
              (:checkcast "java/lang/Integer")
              (:invokevirtual "java/lang/Integer" "intValue" "()I")
-             (unquote b)
+             (asm-unquote b)
              (:checkcast "java/lang/Integer")
              (:invokevirtual "java/lang/Integer" "intValue" "()I")
              :iadd
-             (:invokestatic "java/lang/Integer" "valueOf" "(I)Ljava/lang/Integer;")
-             :areturn)))
+             (:invokestatic "java/lang/Integer" "valueOf" "(I)Ljava/lang/Integer;")))
 
-(defun add2 (n)
-  (inc (inc n)))
+(defun > (a b)
+  (asm-quote (asm-unquote a)
+             (:checkcast "java/lang/Integer")
+             (:invokevirtual "java/lang/Integer" "intValue" "()I")
+             (asm-unquote b)
+             (:checkcast "java/lang/Integer")
+             (:invokevirtual "java/lang/Integer" "intValue" "()I")
+             (:if_icmple falsebranch)
+             (asm-unquote t)
+             :areturn
+             (:label falsebranch)
+             (asm-unquote null)
+             :areturn))
 
-;(add2 40)
+; Playground
+
+(defun adder (n)
+  (function (x) (+ x n)))
+
+((adder 100) 321)
 
 (defun inc (n)
-  (+ n 1))
+  (asm-quote (asm-unquote n)
+             (:checkcast "java/lang/Integer")
+             (:invokevirtual "java/lang/Integer" "intValue" "()I")
+             (:iconst 1)
+             :iadd
+             (:invokestatic "java/lang/Integer" "valueOf" "(I)Ljava/lang/Integer;")))
 
-(inc 999)
+(defun dec (n)
+  (asm-quote (asm-unquote n)
+             (:checkcast "java/lang/Integer")
+             (:invokevirtual "java/lang/Integer" "intValue" "()I")
+             (:iconst -1)
+             :iadd
+             (:invokestatic "java/lang/Integer" "valueOf" "(I)Ljava/lang/Integer;")))
 
-;(add2 40)
+(inc (dec 0))
 
-(def addn (function (n) (function (x) (+ x n))))
+(defun test (n)
+  (if (> 0 (print n))
+    n
+    (recur (dec n))))
 
-((function (x)
-   (let (x 100)
-     (print x))) 123)
+(test 10)
 
-(defmacro abc (x)
-  765)
+(defun my-list (:rest lst)
+  lst)
 
-(defun my-list (:rest args)
-  args)
-
-(my-list 1 2 3)
+(my-list 1 "two" 'three)

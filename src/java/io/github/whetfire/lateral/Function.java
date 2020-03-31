@@ -7,8 +7,8 @@ package io.github.whetfire.lateral;
 
 abstract public class Function {
     abstract public boolean isMacro();
-    abstract public boolean isVarargs();
-    abstract public int paramCount();
+    // abstract public boolean isVarargs();
+    // abstract public int paramCount();
 
     /**
      * apply is the preferred run-time way to call a first class function object.

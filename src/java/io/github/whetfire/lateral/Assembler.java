@@ -1,7 +1,14 @@
 package io.github.whetfire.lateral;
 
 import org.objectweb.asm.*;
+import org.objectweb.asm.util.CheckClassAdapter;
 
+import java.io.FileOutputStream;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.security.Key;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -21,27 +28,33 @@ public class Assembler {
     static Keyword AASTORE = Keyword.makeKeyword("aastore");
     static Keyword ARRAYLENGTH = Keyword.makeKeyword("arraylength");
     static Keyword ATHROW = Keyword.makeKeyword("athrow");
+    static Keyword DUP = Keyword.makeKeyword("dup");
 
     static Keyword CHECKCAST = Keyword.makeKeyword("checkcast");
     static Keyword NEW = Keyword.makeKeyword("new");
     static Keyword ANEWARRAY = Keyword.makeKeyword("anewarray");
 
-    static Keyword DUP = Keyword.makeKeyword("dup");
-
     static Keyword INVOKESTATIC = Keyword.makeKeyword("invokestatic");
     static Keyword INVOKEVIRTUAL = Keyword.makeKeyword("invokevirtual");
     static Keyword INVOKESPECIAL = Keyword.makeKeyword("invokespecial");
     static Keyword INVOKEINTERFACE = Keyword.makeKeyword("invokeinterface");
-
     static Keyword INVOKEDYNAMIC = Keyword.makeKeyword("invokedynamic");
 
     static Keyword IF_ICMPNE = Keyword.makeKeyword("if_icmpne");
+    static Keyword IF_ICMPLT = Keyword.makeKeyword("if_icmplt");
     static Keyword IFNULL = Keyword.makeKeyword("ifnull");
+    static Keyword GOTO = Keyword.makeKeyword("goto");
+    static Keyword LOOKUPSWITCH = Keyword.makeKeyword("lookupswitch");
 
     static Keyword GETSTATIC = Keyword.makeKeyword("getstatic");
     static Keyword PUTSTATIC = Keyword.makeKeyword("putstatic");
     static Keyword GETFIELD = Keyword.makeKeyword("getfield");
     static Keyword PUTFIELD = Keyword.makeKeyword("putfield");
+
+    // assembler directives
+    static Symbol DEFMETHOD = Symbol.makeSymbol("defmethod");
+    static Symbol DEFCLASS = Symbol.makeSymbol("defclass");
+    static Symbol DEFFIELD = Symbol.makeSymbol("deffield");
 
     private static Map<Keyword, Integer> simpleOpMap;
     private static Map<Keyword, Integer> jumpOpMap;
@@ -57,6 +70,7 @@ public class Assembler {
             Map.entry(AASTORE, Opcodes.AASTORE),
             Map.entry(ARRAYLENGTH, Opcodes.ARRAYLENGTH),
             Map.entry(ATHROW, Opcodes.ATHROW),
+            Map.entry(Keyword.makeKeyword("aconst_null"), Opcodes.ACONST_NULL),
             Map.entry(Keyword.makeKeyword("dup2"), Opcodes.DUP2),
             Map.entry(Keyword.makeKeyword("dup_x1"), Opcodes.DUP_X1),
             Map.entry(Keyword.makeKeyword("pop"), Opcodes.POP),
@@ -70,11 +84,19 @@ public class Assembler {
             Map.entry(Keyword.makeKeyword("ifnonnull"), Opcodes.IFNULL),
             Map.entry(Keyword.makeKeyword("ifne"), Opcodes.IFNE),
             Map.entry(Keyword.makeKeyword("ifeq"), Opcodes.IFEQ),
+
             Map.entry(Keyword.makeKeyword("ifgt"), Opcodes.IFGT),
+            Map.entry(Keyword.makeKeyword("ifge"), Opcodes.IFGE),
+
             Map.entry(Keyword.makeKeyword("iflt"), Opcodes.IFLT),
+            Map.entry(Keyword.makeKeyword("ifle"), Opcodes.IFLE),
+
             Map.entry(Keyword.makeKeyword("if_icmpgt"), Opcodes.IF_ICMPGT),
+            Map.entry(Keyword.makeKeyword("if_icmpge"), Opcodes.IF_ICMPGE),
+            Map.entry(Keyword.makeKeyword("if_icmple"), Opcodes.IF_ICMPLE),
+            Map.entry(IF_ICMPLT, Opcodes.IF_ICMPLT),
             Map.entry(IF_ICMPNE, Opcodes.IF_ICMPNE),
-            Map.entry(Keyword.makeKeyword("goto"), Opcodes.GOTO)
+            Map.entry(GOTO, Opcodes.GOTO)
         );
 
         opMap = Map.ofEntries(
@@ -202,6 +224,26 @@ public class Assembler {
                 } else if(head.equals(CHECKCAST) || head.equals(NEW) || head.equals(ANEWARRAY)) {
                     // checkcast, new, anewarray, instanceof
                     mv.visitTypeInsn(opMap.get(head), (String) body.first());
+                } else if(head.equals(LOOKUPSWITCH)) {
+                    Label defaultLabel = new Label();
+                    labelMap.put((Symbol) body.first(), defaultLabel);
+                    Sequence indexList = (Sequence) body.second();
+                    int labelCount = indexList.length();
+                    int[] indicies = new int[labelCount];
+                    for(int i = 0; i < labelCount; i ++, indexList = indexList.rest()) {
+                        indicies[i] = (Integer) indexList.first();
+                    }
+
+                    Sequence labelList = (Sequence) body.third();
+                    Label[] labels = new Label[labelCount];
+                    for(int i = 0; i < labelCount; i ++, labelList = labelList.rest()) {
+                        Symbol labSym = (Symbol) labelList.first();
+                        Label label = new Label();
+                        labelMap.put(labSym, label);
+                        labels[i] = label;
+                    }
+
+                    mv.visitLookupSwitchInsn(defaultLabel, indicies, labels);
                 } else {
                     throw new RuntimeException(head.toString());
                 }
@@ -239,7 +281,7 @@ public class Assembler {
             if(obj instanceof Sequence) {
                 Sequence member = (Sequence) obj;
                 Object head = member.first();
-                if(Compiler.DEFMETHOD.equals(head)) {
+                if(DEFMETHOD.equals(head)) {
                     //System.out.println(member);
                     String mname = (String) member.second();
                     String descriptor = (String) member.third();
@@ -256,7 +298,7 @@ public class Assembler {
                     visitOpCodes(mv, member);
                     mv.visitMaxs(-1, -1);
                     mv.visitEnd();
-                } else if(Compiler.DEFFIELD.equals(head)) {
+                } else if(DEFFIELD.equals(head)) {
                     classWriter.visitField(Opcodes.ACC_PUBLIC,
                             (String) member.second(),
                             (String) member.third(),
@@ -274,7 +316,11 @@ public class Assembler {
         /*
         PrintWriter printWriter = new PrintWriter(System.out);
         CheckClassAdapter.verify(new ClassReader(classBytes), true, printWriter);
-        System.out.println("================");
+        try (FileOutputStream fos = new FileOutputStream("Test.class")){
+            fos.write(classBytes);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
         // */
         return classBytes;
     }

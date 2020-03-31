@@ -70,6 +70,16 @@ public abstract class Sequence implements Iterable<Object> {
             return new ArraySequence(values);
     }
 
+    public static Sequence makeList(Object[] values, int index) {
+        if(index == values.length) {
+            return EmptySequence.EMPTY_SEQUENCE;
+        } else if(index < values.length) {
+            return new ArraySequence(values, index);
+        } else {
+            throw new RuntimeException("invalid ArraySequence");
+        }
+    }
+
     /**
      * InvokeDynamic bootstrap method for creating arbitrary length sequences. Returns a CallSite which
      * packs the number of arguments given in methodType into an ArraySequence

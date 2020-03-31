@@ -107,6 +107,9 @@ public class LispReader {
         } else if('0' <= value.charAt(0) && value.charAt(0) <= '9') {
             // TODO: other numerical literals
             return Integer.parseInt(value);
+        } else if('-' == value.charAt(0) && value.length() > 1 &&
+                '0' <= value.charAt(1) && value.charAt(1) <= '9') {
+            return Integer.parseInt(value);
         } else {
             return Symbol.makeSymbol(value);
         }
@@ -165,8 +168,7 @@ public class LispReader {
 
         StringBuilder sb = new StringBuilder();
         sb.append(c);
-        read:
-        while(hasNextChar()) {
+        read: while(hasNextChar()) {
             c = peekChar();
             switch (c) {
                 case '(':
@@ -235,14 +237,6 @@ public class LispReader {
         } else {
             // simple form is just quoted since it can't contain unquotes
             return Sequence.makeList(QUOTE, quoteBody);
-        }
-    }
-
-    public static void main(String[] args) throws IOException {
-        LispReader reader = fileReader("./src/lisp/test.lisp");
-        Object form;
-        while((form = reader.readForm()) != null) {
-            System.out.println(form);
         }
     }
 }
