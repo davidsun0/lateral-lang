@@ -23,7 +23,7 @@ class CompEnvir {
            // first local slot is taken by Function, symbols start at 1
            bindCount = 1;
        else
-           bindCount = parent.bindCount + parent.bindings.size();
+           bindCount = parent.bindCount;
    }
 
    int insert(Symbol symbol) {

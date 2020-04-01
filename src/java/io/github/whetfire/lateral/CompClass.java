@@ -1,13 +1,10 @@
 package io.github.whetfire.lateral;
 
-import org.objectweb.asm.Label;
 import org.objectweb.asm.Type;
 
 import java.lang.invoke.MethodType;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashSet;
 
 /**
  * Compilation unit representing a JVM Class
@@ -16,6 +13,7 @@ class CompClass {
     static int CLASS_NUM = 0;
 
     String name;
+    Symbol functionName;
     ArrayList<Object> members;
     private ArrayList<Symbol> captured;
     boolean isMacro = false;
@@ -30,18 +28,22 @@ class CompClass {
     int varargsCount = -1;
 
     CompClass() {
-        this(EmptySequence.EMPTY_SEQUENCE);
+        this(null);
     }
 
-    CompClass(Sequence params) {
+    CompClass(Symbol functionName) {
         members = new ArrayList<>();
-        // captured = new HashSet<>();
         captured = new ArrayList<>();
         this.name = "AnonFunc" + (CLASS_NUM ++);
+        this.functionName = functionName;
     }
 
-    String getName() {
+    String getClassName() {
         return this.name;
+    }
+
+    Symbol getFunctionName() {
+        return functionName;
     }
 
     String getConstructor() {
@@ -97,7 +99,7 @@ class CompClass {
     void generateInvoker(int paramCount, boolean isVarargs, ArrayList<Object> opcodes) {
         if(isVarargs) {
             if(varargsCount == -1)
-                varargsCount = paramCount;
+                varargsCount = paramCount - 1;
             else
                 throw new RuntimeException();
         } else {
@@ -196,17 +198,20 @@ class CompClass {
         applyOps.add(Assembler.ARRAYLENGTH);
         Symbol errLabel = Symbol.gensym("error");
 
+        // TODO: optimize for seamless varargs (no holes, every apply call is valid) to not throw error
         if(arities.size() == 1) {
             // simple if statement for single arity functions
             applyOps.add(Sequence.makeList(Assembler.ICONST, arities.get(0)));
             applyOps.add(Sequence.makeList(Assembler.IF_ICMPNE, errLabel));
             addInvokerCase(applyOps, arities.get(0));
+            // single arity cannot be seamless
         } else if(arities.size() == 0 && varargsCount != -1) {
             addVarargsInvokerCase(applyOps, errLabel);
+            // varargs is seamless if varargsCount == 0
         } else if(arities.size() > 1) {
-            // TODO: optimize for seamless varargs (no holes, every apply call is valid) to not throw error
             // sort arities
             Collections.sort(arities);
+            // seamless if arities start at 0 and varargsCount is equal to smallest hole
             Symbol[] arityLabels = new Symbol[arities.size()];
             for (int i = 0; i < arities.size(); i++) {
                 arityLabels[i] = Symbol.gensym("table");
@@ -246,92 +251,10 @@ class CompClass {
         members.add(Sequence.makeList(applyOps.toArray()));
     }
 
-    void generateInherits(boolean isMacro, boolean isVarargs, int paramCount) {
-        this.isMacro = isMacro;
-        members.add(Sequence.makeList(
-                Assembler.DEFMETHOD, "isMacro", "()Z", EmptySequence.EMPTY_SEQUENCE,
-                Sequence.makeList(Assembler.ICONST, isMacro ? 1 : 0),
-                Assembler.IRETURN));
-
-        members.add(Sequence.makeList(
-                Assembler.DEFMETHOD, "isVarargs", "()Z", EmptySequence.EMPTY_SEQUENCE,
-                Sequence.makeList(Assembler.ICONST, isVarargs ? 1 : 0),
-                Assembler.IRETURN));
-
-        members.add(Sequence.makeList(
-                Assembler.DEFMETHOD, "paramCount", "()I", EmptySequence.EMPTY_SEQUENCE,
-                Sequence.makeList(Assembler.ICONST, paramCount),
-                Assembler.IRETURN));
-
-        // APPLY GENERATOR IS NOT FUN TO WRITE IN JAVA
-        ArrayList<Object> applyOps = new ArrayList<>();
-        applyOps.add(Assembler.DEFMETHOD);
-        applyOps.add("apply");
-        applyOps.add("([Ljava/lang/Object;)Ljava/lang/Object;");
-        applyOps.add(EmptySequence.EMPTY_SEQUENCE);
-
-        applyOps.add(Sequence.makeList(Assembler.ALOAD, 1));
-        applyOps.add(Assembler.ARRAYLENGTH);
-        applyOps.add(Sequence.makeList(Assembler.ICONST, paramCount));
-        Symbol exceptionLabel = Symbol.makeSymbol("exception");
-        // TODO: convert to tableswitch for multi-arity functions
-        if(isVarargs)
-            applyOps.add(Sequence.makeList(Assembler.IF_ICMPLT, exceptionLabel));
-        else
-            applyOps.add(Sequence.makeList(Assembler.IF_ICMPNE, exceptionLabel));
-        applyOps.add(Sequence.makeList(Assembler.ALOAD, 0));
-        for(int i = 0; i < paramCount; i ++) {
-            if(isVarargs && i == paramCount - 1) {
-                applyOps.add(Sequence.makeList(Assembler.NEW, Type.getInternalName(ArraySequence.class)));
-                applyOps.add(Assembler.DUP);
-                applyOps.add(Sequence.makeList(Assembler.ALOAD, 1));
-                applyOps.add(Sequence.makeList(Assembler.ICONST, i));
-                applyOps.add(Sequence.makeList(
-                        Assembler.INVOKESPECIAL, Type.getInternalName(ArraySequence.class),
-                        "<init>", Assembler.getMethodDescriptor(Object[].class, int.class, void.class)));
-            } else {
-                // load array
-                applyOps.add(Sequence.makeList(Assembler.ALOAD, 1));
-                // load index
-                applyOps.add(Sequence.makeList(Assembler.ICONST, i));
-                // unpack array element
-                applyOps.add(Assembler.AALOAD);
-            }
-        }
-        String descriptor;
-        if(isVarargs) {
-            Class<?>[] classes = Assembler.getParameterClasses(paramCount);
-            classes[paramCount - 1] = Sequence.class;
-            descriptor = MethodType.methodType(Object.class, classes).toMethodDescriptorString();
-        }
-        else
-            descriptor = Assembler.getMethodDescriptor(Object.class, paramCount);
-        applyOps.add(Sequence.makeList(Assembler.INVOKEVIRTUAL, this.name, "invoke", descriptor));
-        applyOps.add(Assembler.ARETURN);
-
-        applyOps.add(Sequence.makeList(Assembler.LABEL, exceptionLabel));
-        applyOps.add(Sequence.makeList(Assembler.NEW, Type.getInternalName(RuntimeException.class)));
-        applyOps.add(Assembler.DUP);
-        /*
-        // display debug info about the array
-        applyOps.add(ArraySequence.makeList(Assembler.ALOAD, 1));
-        applyOps.add(ArraySequence.makeList(Assembler.INVOKESTATIC, Type.getInternalName(Arrays.class),
-                "deepToString", "([Ljava/lang/Object;)Ljava/lang/String;"));
-        applyOps.add(ArraySequence.makeList(Assembler.INVOKESPECIAL,
-                Type.getInternalName(RuntimeException.class),
-                "<init>", "(Ljava/lang/String;)V"));
-         */
-        applyOps.add(Sequence.makeList(Assembler.INVOKESPECIAL,
-                Type.getInternalName(RuntimeException.class),
-                "<init>", "()V"));
-        applyOps.add(Assembler.ATHROW);
-        members.add(Sequence.makeList(applyOps.toArray()));
-    }
-
     Sequence toTree() {
         Sequence header = Sequence.makeList(
                 Assembler.DEFCLASS,
-                getName(),
+                getClassName(),
                 // meta?
                 EmptySequence.EMPTY_SEQUENCE);
         Sequence body = new ArraySequence(members.toArray());

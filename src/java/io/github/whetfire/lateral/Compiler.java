@@ -31,11 +31,13 @@ public class Compiler {
             "valueOf", Assembler.getMethodDescriptor(int.class, Integer.class)
     );
 
+    // TODO: convert to dynamic LDC
     static Sequence MAKE_SYM = new ArraySequence(
             Assembler.INVOKESTATIC, Type.getInternalName(Symbol.class),
             "makeSymbol", Assembler.getMethodDescriptor(String.class, Symbol.class)
     );
 
+    // TODO: convert to dynamic LDC
     static Sequence MAKE_KEY = new ArraySequence(
             Assembler.INVOKESTATIC, Type.getInternalName(Keyword.class),
             "makeKeyword", Assembler.getMethodDescriptor(String.class, Keyword.class)
@@ -155,12 +157,12 @@ public class Compiler {
             forms = forms.rest();
         }
 
-        CompClass lambdaClass = new CompClass();
-        CompEnvir lambdaEnvir = new CompEnvir(parentEnvir, lambdaClass);
+        CompClass lambdaClass = new CompClass(name);
         classes.add(lambdaClass);
 
         // TODO: assert that there are a matched number of params / body
         for(;!forms.isEmpty(); forms = forms.rest().rest()) {
+            CompEnvir lambdaEnvir = new CompEnvir(parentEnvir, lambdaClass);
             Sequence params = (Sequence) forms.first();
             int paramCount = params.length();
             boolean isVarargs = false;
@@ -203,20 +205,20 @@ public class Compiler {
                 // need: constructor args
                 // need: constructor
                 CompClass lambdaClass = compileLambda((Sequence) ast, context.envir);
-                context.add(Assembler.NEW, lambdaClass.getName());
+                context.add(Assembler.NEW, lambdaClass.getClassName());
                 context.add(Assembler.DUP);
                 for(Symbol sym : lambdaClass.getCaptured()) {
                     compile(sym, context, false);
                 }
-                context.add(Assembler.INVOKESPECIAL, lambdaClass.getName(), "<init>",
+                context.add(Assembler.INVOKESPECIAL, lambdaClass.getClassName(), "<init>",
                         lambdaClass.getConstructor());
             } else if (LET.equals(head)) {
                 CompEnvir parentEnvir = context.envir;
                 context.envir = new CompEnvir(context.envir);
                 Sequence bindings = (Sequence) body.first();
                 while (!bindings.isEmpty()) {
-                    int index = context.envir.insert((Symbol) bindings.first());
                     compile(bindings.second(), context, false);
+                    int index = context.envir.insert((Symbol) bindings.first());
                     context.add(Sequence.makeList(Assembler.ASTORE, index));
                     bindings = bindings.rest().rest();
                 }
@@ -235,11 +237,10 @@ public class Compiler {
                 compile and store each argument
                 goto label
                  */
-                if(!isTail || body.length() < context.paramCount ||
-                        (!context.isVarargs && body.length() > context.paramCount))
-                    // TODO: if varargs, paramCount-1 is valid
+                if(!isTail || (context.isVarargs && body.length() < context.paramCount - 1)
+                    || (!context.isVarargs && body.length() != context.paramCount)) {
                     throw new RuntimeException();
-
+                }
                 Symbol label;
                 Object firstBytecode = context.bytecode.get(0);
                 if(firstBytecode instanceof Sequence &&
@@ -250,12 +251,14 @@ public class Compiler {
                     context.bytecode.add(0, Sequence.makeList(Assembler.LABEL, label));
                 }
 
-                // first slot is 'this', locals begin at 1
-                int i = 1;
                 for(Object obj : body) {
                     compile(obj, context, false);
+                }
+                // first slot is 'this', locals begin at 1
+                for(int i = body.length(); i > 0; i --) {
                     context.add(Assembler.ASTORE, i);
                 }
+                // TODO: repack rest arguments if function is varargs
                 context.add(Assembler.GOTO, label);
                 return;
             } else if (QUOTE.equals(head)) {
@@ -278,7 +281,7 @@ public class Compiler {
                 compile(body.second(), context, isTail);
                 if (!isTail) {
                     endLabel = Symbol.gensym("end");
-                    context.add(Assembler.GOTO, targetLabel);
+                    context.add(Assembler.GOTO, endLabel);
                 }
                 context.add(Assembler.LABEL, targetLabel);
                 // else clause
@@ -296,16 +299,27 @@ public class Compiler {
                         context.add(obj);
                 }
             } else if (head instanceof Symbol && !context.envir.contains((Symbol) head)) {
-                // TODO: if function calls itself
-                // context.compClass.getName();
-
-                // optimization via invokedynamic on function name
-                for (Object arg : body) {
-                    compile(arg, context, false);
+                if(head.equals(context.compClass.getFunctionName())) {
+                    /*
+                    Optimization: if the function calls itself with a different arity,
+                    bypass the apply function and directly call invoke
+                    TODO: extend to lambdas calling parent function
+                     */
+                    context.add(Assembler.ALOAD, 0);
+                    for (Object arg : body) {
+                        compile(arg, context, false);
+                    }
+                    context.add(Assembler.INVOKEVIRTUAL, context.compClass.getClassName(),
+                            "invoke", Assembler.getMethodDescriptor(Object.class, body.length()));
+                } else {
+                    // optimization via invokedynamic on function name
+                    for (Object arg : body) {
+                        compile(arg, context, false);
+                    }
+                    context.add(Assembler.INVOKEDYNAMIC, ENVIR_FUNCTION, "futureUse",
+                            Assembler.getMethodDescriptor(Object.class, body.length()),
+                            head.toString());
                 }
-                context.add(Assembler.INVOKEDYNAMIC, ENVIR_FUNCTION, "futureUse",
-                        Assembler.getMethodDescriptor(Object.class, body.length()),
-                        head.toString());
             } else {
                 // dynamically load function object and call Function.apply
                 compile(head, context, false);
@@ -382,6 +396,9 @@ public class Compiler {
             context.add(PARSE_INT);
         } else if (ast instanceof String) {
             context.add(Assembler.LDC, ast);
+        } else if (ast instanceof Keyword) {
+            context.add(Assembler.LDC, ((Keyword) ast).getValue());
+            context.add(MAKE_KEY);
         } else {
             throw new RuntimeException(ast.toString());
         }
@@ -443,7 +460,7 @@ public class Compiler {
     }
 
     public static void main(String[] args) throws IOException {
-        LispReader lispReader = LispReader.fileReader("./src/lisp/lambda.lisp");
+        LispReader lispReader = LispReader.fileReader("./src/lisp/core.lisp");
         Object form;
         while((form = lispReader.readForm()) != null) {
             try {
@@ -452,6 +469,5 @@ public class Compiler {
                 e.printStackTrace();
             }
         }
-        // repl();
     }
 }

@@ -4,11 +4,8 @@ import org.objectweb.asm.*;
 import org.objectweb.asm.util.CheckClassAdapter;
 
 import java.io.FileOutputStream;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
-import java.security.Key;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -33,6 +30,7 @@ public class Assembler {
     static Keyword CHECKCAST = Keyword.makeKeyword("checkcast");
     static Keyword NEW = Keyword.makeKeyword("new");
     static Keyword ANEWARRAY = Keyword.makeKeyword("anewarray");
+    static Keyword INSTANCEOF = Keyword.makeKeyword("instanceof");
 
     static Keyword INVOKESTATIC = Keyword.makeKeyword("invokestatic");
     static Keyword INVOKEVIRTUAL = Keyword.makeKeyword("invokevirtual");
@@ -110,7 +108,8 @@ public class Assembler {
             Map.entry(GETFIELD, Opcodes.GETFIELD),
             Map.entry(CHECKCAST, Opcodes.CHECKCAST),
             Map.entry(ANEWARRAY, Opcodes.ANEWARRAY),
-            Map.entry(NEW, Opcodes.NEW)
+            Map.entry(NEW, Opcodes.NEW),
+            Map.entry(INSTANCEOF, Opcodes.INSTANCEOF)
         );
     }
 
@@ -221,7 +220,8 @@ public class Assembler {
                     } else {
                         mv.visitLdcInsn(value);
                     }
-                } else if(head.equals(CHECKCAST) || head.equals(NEW) || head.equals(ANEWARRAY)) {
+                } else if(head.equals(CHECKCAST) || head.equals(NEW)
+                        || head.equals(ANEWARRAY) || head.equals(INSTANCEOF)) {
                     // checkcast, new, anewarray, instanceof
                     mv.visitTypeInsn(opMap.get(head), (String) body.first());
                 } else if(head.equals(LOOKUPSWITCH)) {
