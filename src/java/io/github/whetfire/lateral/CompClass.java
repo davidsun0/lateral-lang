@@ -111,6 +111,14 @@ class CompClass {
         if(isVarargs)
             params[params.length - 1] = Sequence.class;
 
+        /*
+        TODO: use java.util.function interfaces
+        or make my own
+        In compiler, avoid expensive (?) calls through varargs apply
+        0: Supplier                     get()
+        1: Function/UnaryOperator       apply(A)
+        2: BiFunction/BinaryOperator    apply(A, B)
+         */
         Sequence header = Sequence.makeList(
                 Assembler.DEFMETHOD, "invoke",
                 MethodType.methodType(Object.class, params).toMethodDescriptorString(),

@@ -1,5 +1,7 @@
 package io.github.whetfire.lateral;
 
+import java.util.ArrayList;
+
 /**
  * Parent class of all Lateral functions.
  * TODO: convert to interface?
@@ -7,6 +9,9 @@ package io.github.whetfire.lateral;
 
 abstract public class Function {
     abstract public boolean isMacro();
+    public String toString() {
+        return "#<function>";
+    }
 
     /**
      * apply is the preferred run-time way to call a first class function object.
@@ -25,7 +30,11 @@ abstract public class Function {
      */
     abstract public Object apply(Object ... args);
 
-    public String toString() {
-        return "#<function>";
+    public static Object apply(Function function, Sequence arglist) {
+        ArrayList<Object> args = new ArrayList<>();
+        for(; !arglist.isEmpty(); arglist = arglist.rest()) {
+            args.add(arglist.first());
+        }
+        return function.apply(args.toArray());
     }
 }

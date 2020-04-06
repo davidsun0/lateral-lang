@@ -31,7 +31,6 @@ public abstract class Sequence implements Iterable<Object> {
         return nth(3);
     }
 
-    // TODO: rename to prepend?
     public Sequence cons(Object obj) {
         return new LinkedList(obj, this);
     }
@@ -49,14 +48,10 @@ public abstract class Sequence implements Iterable<Object> {
     public static Sequence concat(Sequence seqs) {
         ArrayList<Object> forms = new ArrayList<>();
         while(!seqs.isEmpty()) {
-            if(seqs.first() instanceof Sequence) {
-                Sequence seq = (Sequence) seqs.first();
-                while(!seq.isEmpty()) {
-                    forms.add(seq.first());
-                    seq = seq.rest();
-                }
-            } else {
-                throw new TypeException(seqs.first().getClass(), Sequence.class);
+            Sequence seq = (Sequence) seqs.first();
+            while(!seq.isEmpty()) {
+                forms.add(seq.first());
+                seq = seq.rest();
             }
             seqs = seqs.rest();
         }

@@ -2,21 +2,126 @@ package io.github.whetfire.lateral;
 
 import java.lang.invoke.*;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.HashMap;
 
 public class Environment {
     private static class ValueAndCall {
+        boolean exists;
         Object value;
-        CallSite asObject;
-        CallSite asFunction;
+        MutableCallSite asObject;
+        ArrayList<MutableCallSite> asFunction;
 
-        ValueAndCall(CallSite asObject, CallSite asFunction) {
-            this.asObject = asObject;
-            this.asFunction = asFunction;
+        ValueAndCall() {
+            this.asFunction = new ArrayList<>();
+            exists = false;
         }
 
-        CallSite getFunction(MethodType methodType) {
-            return null;
+        ValueAndCall(Object value) {
+            this();
+            exists = true;
+            this.value = value;
+        }
+
+        void update(Object newValue) {
+            value = newValue;
+            exists = true;
+            if(asObject != null) {
+                MethodHandle mh = MethodHandles.constant(Object.class, value);
+                        //.asType(MethodType.methodType(Object.class, void.class));
+                asObject.setTarget(mh);
+            }
+            for(MutableCallSite callSite : asFunction) {
+                if(value instanceof Function) {
+
+                } else {
+
+                }
+            }
+
+            ArrayList<MutableCallSite> mutatedSites = new ArrayList<>();
+            if(asObject != null)
+                mutatedSites.add(asObject);
+            mutatedSites.addAll(asFunction);
+            MutableCallSite.syncAll(mutatedSites.toArray(new MutableCallSite[0]));
+        }
+
+        CallSite getObject(Symbol name, MethodType methodType) {
+            MethodHandle result;
+            if(exists) {
+                result = MethodHandles.constant(Object.class, value).asType(methodType);
+            } else {
+                result = MethodHandles.dropArguments(
+                        MethodHandles.throwException(Object.class, NoSuchMethodException.class)
+                                .bindTo(new NoSuchMethodException("function " + name + " does not exist")),
+                        0, methodType.parameterList());
+            }
+            asObject = new MutableCallSite(result);
+            return asObject;
+        }
+
+        MethodHandle lookupHandle(MethodHandles.Lookup lookup, MethodType methodType, String name) {
+            if(exists && value instanceof Function) {
+                Function function = (Function) value;
+                // TODO: return error handle if function is macro
+                try {
+                    lookup.findVirtual(value.getClass(), "invoke", methodType);
+                } catch (NoSuchMethodException e) {
+                    try {
+                        for (Method m : value.getClass().getMethods()) {
+                            if ("invoke".equals(m.getName())
+                                    && m.getParameterCount() > 0
+                                    && m.getParameterCount() - 1 <= methodType.parameterCount()
+                                    && m.getParameterTypes()[m.getParameterCount() - 1] == Sequence.class) {
+                                // the actual method to be called
+                                MethodHandle base = lookup.unreflect(m).bindTo(function);
+                                /*
+                                asCollector collects (given - expected + 1) arguments into an Array
+                                the array is fed into ArraySequence.makeList, which returns the varargs as a single Sequence
+                                 */
+                                MethodHandle makelist = lookup.findStatic(ArraySequence.class, "makeList",
+                                        MethodType.methodType(Sequence.class, Object[].class)
+                                ).asCollector(Object[].class, methodType.parameterCount() - m.getParameterCount() + 1);
+                                /*
+                                 all but the first expected - 1 arguments are fed into the makelist described above
+                                 This effectively combines the two MethodHandles into one with automatic varargs to Sequence collection
+                                 */
+                                return MethodHandles.collectArguments(base, m.getParameterCount() - 1, makelist);
+                            }
+                        }
+                    } catch (NoSuchMethodException | IllegalAccessException ex) {
+                        throw new RuntimeException(ex);
+                    }
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException(e);
+                }
+                return MethodHandles.dropArguments(
+                        MethodHandles.throwException(Object.class, TypeException.class)
+                                .bindTo(new SyntaxException(name + " can't be applied to " + methodType.toString())),
+                        0, methodType.parameterList());
+            } else if(exists) {
+                return MethodHandles.dropArguments(
+                        MethodHandles.throwException(Object.class, TypeException.class)
+                                .bindTo(new TypeException(name + " can't be used as a function")),
+                        0, methodType.parameterList());
+            } else {
+                return MethodHandles.dropArguments(
+                        MethodHandles.throwException(Object.class, NoSuchMethodException.class)
+                                .bindTo(new NoSuchMethodException("function " + name + " does not exist")),
+                        0, methodType.parameterList());
+            }
+        }
+
+        CallSite getFunction(MethodHandles.Lookup lookup, MethodType methodType) {
+            for(CallSite callSite : asFunction) {
+                if(methodType.equals(callSite.getTarget().type())) {
+                    return callSite;
+                }
+            }
+            MethodHandle target = lookupHandle(lookup, methodType, "test");
+            MutableCallSite callSite = new MutableCallSite(target);
+            asFunction.add(callSite);
+            return callSite;
         }
     }
 
@@ -25,9 +130,6 @@ public class Environment {
 
     public static Object insert(Symbol symbol, Object obj) {
         symMap.put(symbol, obj);
-        // create two MethodHandles
-        // replace if exists
-        // else make MutableCallSite
         return obj;
     }
 
@@ -109,9 +211,7 @@ public class Environment {
                 // System.out.println(m.getName());
                 if("invoke".equals(m.getName())) {
                     Class<?>[] params = m.getParameterTypes();
-                    if(m.getParameterCount() == dynamicType.parameterCount()) {
-                        result = lookup.unreflect(m).bindTo(function);
-                    } else if(params.length > 0 && params[params.length - 1] == Sequence.class
+                    if(params.length > 0 && params[params.length - 1] == Sequence.class
                             && params.length - 1 <= dynamicType.parameterCount()) {
                         // the actual method to be called
                         MethodHandle base = lookup.unreflect(m).bindTo(function);
@@ -127,12 +227,14 @@ public class Environment {
                          This effectively combines the two MethodHandles into one with automatic varargs to Sequence collection
                          */
                         result = MethodHandles.collectArguments(base, m.getParameterCount() - 1, makelist);
+                    } else if(m.getParameterCount() == dynamicType.parameterCount()) {
+                        result = lookup.unreflect(m).bindTo(function);
                     }
                 }
             }
             if(result == null) {
                 result = MethodHandles.dropArguments(
-                        MethodHandles.throwException(Object.class, TypeException.class)
+                        MethodHandles.throwException(Object.class, SyntaxException.class)
                                 .bindTo(new SyntaxException(symMap.get(name) + " can't be applied to " + dynamicType.toString())),
                         0, dynamicType.parameterList());
             }

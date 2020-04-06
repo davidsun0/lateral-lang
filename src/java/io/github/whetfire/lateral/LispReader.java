@@ -198,7 +198,10 @@ public class LispReader {
             Object head = list.first();
             if(head instanceof Sequence) {
                 Sequence inner = (Sequence) head;
-                if (inner.first().equals(QUOTE)) {
+                if (inner.isEmpty()) {
+                    // TODO: untested
+                    forms.add(Sequence.makeList(LIST, EmptySequence.EMPTY_SEQUENCE));
+                } else if (inner.first().equals(QUOTE)) {
                     // `(... (quote x) ...) -> (concat ... (list (quote (quote x))) ...)
                     forms.add(Sequence.makeList(LIST, inner));
                 } else if (inner.first().equals(UNQUOTE_SPLICING)) {

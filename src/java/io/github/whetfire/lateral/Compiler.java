@@ -67,7 +67,7 @@ public class Compiler {
 
     ArrayList<CompClass> classes = new ArrayList<>();
 
-    static Object macroExpand(Object expr) {
+    public static Object macroExpand(Object expr) {
         while(true) {
             if(!(expr instanceof Sequence)) {
                 return expr;
@@ -239,7 +239,7 @@ public class Compiler {
                  */
                 if(!isTail || (context.isVarargs && body.length() < context.paramCount - 1)
                     || (!context.isVarargs && body.length() != context.paramCount)) {
-                    throw new RuntimeException();
+                    throw new RuntimeException("wrong arity for recur");
                 }
                 Symbol label;
                 Object firstBytecode = context.bytecode.get(0);
