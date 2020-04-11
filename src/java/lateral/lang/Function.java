@@ -1,4 +1,4 @@
-package io.github.whetfire.lateral;
+package lateral.lang;
 
 import java.util.ArrayList;
 

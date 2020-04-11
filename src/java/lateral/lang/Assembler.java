@@ -1,11 +1,7 @@
-package io.github.whetfire.lateral;
+package lateral.lang;
 
 import org.objectweb.asm.*;
-import org.objectweb.asm.util.CheckClassAdapter;
 
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.PrintWriter;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -50,9 +46,9 @@ public class Assembler {
     static Keyword PUTFIELD = Keyword.makeKeyword("putfield");
 
     // assembler directives
-    static Symbol DEFMETHOD = Symbol.makeSymbol("defmethod");
-    static Symbol DEFCLASS = Symbol.makeSymbol("defclass");
-    static Symbol DEFFIELD = Symbol.makeSymbol("deffield");
+    static lateral.lang.Symbol DEFMETHOD = lateral.lang.Symbol.makeSymbol("defmethod");
+    static lateral.lang.Symbol DEFCLASS = lateral.lang.Symbol.makeSymbol("defclass");
+    static lateral.lang.Symbol DEFFIELD = lateral.lang.Symbol.makeSymbol("deffield");
 
     private static Map<Keyword, Integer> simpleOpMap;
     private static Map<Keyword, Integer> jumpOpMap;
@@ -71,10 +67,14 @@ public class Assembler {
             Map.entry(Keyword.makeKeyword("aconst_null"), Opcodes.ACONST_NULL),
             Map.entry(Keyword.makeKeyword("dup2"), Opcodes.DUP2),
             Map.entry(Keyword.makeKeyword("dup_x1"), Opcodes.DUP_X1),
+            Map.entry(Keyword.makeKeyword("dup_x2"), Opcodes.DUP_X2),
             Map.entry(Keyword.makeKeyword("pop"), Opcodes.POP),
             Map.entry(Keyword.makeKeyword("swap"), Opcodes.SWAP),
             Map.entry(Keyword.makeKeyword("isub"), Opcodes.ISUB),
-            Map.entry(Keyword.makeKeyword("iadd"), Opcodes.IADD)
+            Map.entry(Keyword.makeKeyword("iadd"), Opcodes.IADD),
+            Map.entry(Keyword.makeKeyword("iand"), Opcodes.IAND),
+            Map.entry(Keyword.makeKeyword("lsub"), Opcodes.LSUB),
+            Map.entry(Keyword.makeKeyword("lneg"), Opcodes.LNEG)
         );
 
         jumpOpMap = Map.ofEntries(
@@ -146,7 +146,7 @@ public class Assembler {
     }
 
     private static void visitOpCodes(MethodVisitor mv, Iterable<Object> opcodes) {
-        HashMap<Symbol, Label> labelMap = new HashMap<>();
+        HashMap<lateral.lang.Symbol, Label> labelMap = new HashMap<>();
         for(Object opcode : opcodes) {
             // System.out.println(opcode);
             if(opcode instanceof Sequence) {
@@ -154,7 +154,7 @@ public class Assembler {
                 Sequence body = ((Sequence) opcode).rest();
                 if(jumpOpMap.containsKey(head)) {
                     int opcodeValue = jumpOpMap.get(head);
-                    Symbol labelName = (Symbol) body.first();
+                    lateral.lang.Symbol labelName = (lateral.lang.Symbol) body.first();
                     if(labelMap.containsKey(labelName)) {
                         mv.visitJumpInsn(opcodeValue, labelMap.get(labelName));
                     } else {
@@ -163,7 +163,7 @@ public class Assembler {
                         labelMap.put(labelName, label);
                     }
                 } else if(head.equals(LABEL)) {
-                    Symbol labelName = (Symbol) body.first();
+                    lateral.lang.Symbol labelName = (lateral.lang.Symbol) body.first();
                     if(labelMap.containsKey(labelName)) {
                         mv.visitLabel(labelMap.get(labelName));
                     } else {
@@ -172,7 +172,25 @@ public class Assembler {
                         labelMap.put(labelName, label);
                     }
                 } else if(head.equals(LDC)) {
-                    mv.visitLdcInsn(((Sequence) opcode).second());
+                    // TODO: better LDC dynamic syntax
+                    if(body.first() instanceof Sequence) {
+                        // assuming all LDC sequences are dynamic constants
+                        // it would be illegal otherwise
+                        Sequence dynamicConstant = (Sequence) body.first();
+                        String name = (String) dynamicConstant.first();
+                        String descriptor = (String) dynamicConstant.second();
+                        Sequence handleArgs = (Sequence) dynamicConstant.third();
+                        Handle dynamicHandle = new Handle(
+                                Opcodes.H_INVOKESTATIC,
+                                (String) handleArgs.first(),
+                                (String) handleArgs.second(),
+                                (String) handleArgs.third(),
+                                false);
+                        mv.visitLdcInsn(new ConstantDynamic(
+                                name, descriptor, dynamicHandle));
+                    } else {
+                        mv.visitLdcInsn(((Sequence) opcode).second());
+                    }
                 } else if(INVOKESTATIC.equals(head) || INVOKEVIRTUAL.equals(head)
                         || INVOKESPECIAL.equals(head) || INVOKEINTERFACE.equals(head)) {
                     mv.visitMethodInsn(opMap.get(head),
@@ -226,7 +244,7 @@ public class Assembler {
                     mv.visitTypeInsn(opMap.get(head), (String) body.first());
                 } else if(head.equals(LOOKUPSWITCH)) {
                     Label defaultLabel = new Label();
-                    labelMap.put((Symbol) body.first(), defaultLabel);
+                    labelMap.put((lateral.lang.Symbol) body.first(), defaultLabel);
                     Sequence indexList = (Sequence) body.second();
                     int labelCount = indexList.length();
                     int[] indicies = new int[labelCount];
@@ -237,7 +255,7 @@ public class Assembler {
                     Sequence labelList = (Sequence) body.third();
                     Label[] labels = new Label[labelCount];
                     for(int i = 0; i < labelCount; i ++, labelList = labelList.rest()) {
-                        Symbol labSym = (Symbol) labelList.first();
+                        lateral.lang.Symbol labSym = (lateral.lang.Symbol) labelList.first();
                         Label label = new Label();
                         labelMap.put(labSym, label);
                         labels[i] = label;

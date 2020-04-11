@@ -1,4 +1,4 @@
-package io.github.whetfire.lateral;
+package lateral.lang;
 
 import org.objectweb.asm.Type;
 

@@ -1,4 +1,4 @@
-package io.github.whetfire.lateral;
+package lateral.lang;
 
 public final class Keyword {
     private final String value;

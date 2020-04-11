@@ -1,4 +1,4 @@
-package io.github.whetfire.lateral;
+package lateral.lang;
 
 public class ClassDefiner extends ClassLoader {
     private ClassDefiner() { ; }

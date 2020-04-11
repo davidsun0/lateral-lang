@@ -1,4 +1,4 @@
-package io.github.whetfire.lateral;
+package lateral.lang;
 
 final public class EmptySequence extends Sequence {
     public static final Sequence EMPTY_SEQUENCE = new EmptySequence();

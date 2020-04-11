@@ -1,4 +1,4 @@
-package io.github.whetfire.lateral;
+package lateral.lang;
 
 public final class Symbol {
     private final String value;
@@ -15,9 +15,6 @@ public final class Symbol {
     }
 
     static private int gensymCount = -1;
-    public static Symbol gensym() {
-        return gensym("gensym_");
-    }
 
     public static Symbol gensym(String prefix) {
         gensymCount ++;

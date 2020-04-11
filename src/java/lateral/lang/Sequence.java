@@ -1,6 +1,5 @@
-package io.github.whetfire.lateral;
+package lateral.lang;
 
-import java.lang.invoke.*;
 import java.util.ArrayList;
 import java.util.Iterator;
 
@@ -48,10 +47,14 @@ public abstract class Sequence implements Iterable<Object> {
     public static Sequence concat(Sequence seqs) {
         ArrayList<Object> forms = new ArrayList<>();
         while(!seqs.isEmpty()) {
-            Sequence seq = (Sequence) seqs.first();
-            while(!seq.isEmpty()) {
-                forms.add(seq.first());
-                seq = seq.rest();
+            if(seqs.first() instanceof Sequence) {
+                Sequence inner = (Sequence) seqs.first();
+                while (!inner.isEmpty()) {
+                    forms.add(inner.first());
+                    inner = inner.rest();
+                }
+            } else {
+                forms.add(seqs.first());
             }
             seqs = seqs.rest();
         }
@@ -73,24 +76,6 @@ public abstract class Sequence implements Iterable<Object> {
         } else {
             throw new RuntimeException("invalid ArraySequence");
         }
-    }
-
-    /**
-     * InvokeDynamic bootstrap method for creating arbitrary length sequences. Returns a CallSite which
-     * packs the number of arguments given in methodType into an ArraySequence
-     * @param lookup Lookup handle given by the InvokeDynamic instruction
-     * @param name Not used
-     * @param methodType Expected type of the CallSite
-     * @return A CallSite for creating new Sequences
-     * @throws IllegalAccessException Should never be thrown as ArraySequence.makeList is public
-     * @throws NoSuchMethodException Should never be thrown as long as ArraySequence.makeList exists
-     */
-    public static CallSite sequenceBuilder(MethodHandles.Lookup lookup, String name, MethodType methodType)
-            throws IllegalAccessException, NoSuchMethodException {
-        int params = methodType.parameterCount();
-        MethodHandle base = lookup.findStatic(ArraySequence.class, "makeList",
-                MethodType.methodType(Sequence.class, Object[].class));
-        return new ConstantCallSite(base.asCollector(Object[].class, params));
     }
 
     // TODO: refactor out to string builder for mixed type sequences

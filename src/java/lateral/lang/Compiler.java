@@ -1,4 +1,4 @@
-package io.github.whetfire.lateral;
+package lateral.lang;
 
 import org.objectweb.asm.Type;
 
@@ -37,11 +37,10 @@ public class Compiler {
             "makeSymbol", Assembler.getMethodDescriptor(String.class, Symbol.class)
     );
 
-    // TODO: convert to dynamic LDC
-    static Sequence MAKE_KEY = new ArraySequence(
-            Assembler.INVOKESTATIC, Type.getInternalName(Keyword.class),
-            "makeKeyword", Assembler.getMethodDescriptor(String.class, Keyword.class)
-    );
+    static Sequence KEY_HANDLE = Sequence.makeList(
+            Type.getInternalName(Bootstrapper.class), "keywordConstant",
+            MethodType.methodType(Keyword.class, MethodHandles.Lookup.class,
+                    String.class, Class.class).toMethodDescriptorString());
 
     // Environment.dynamicObject
     // TODO: convert to dynamic LDC
@@ -58,9 +57,9 @@ public class Compiler {
                     MethodType.class, String.class).toMethodDescriptorString()
     );
 
-    // Sequence.sequenceBuilder
+    // Bootstrapper.sequenceBuilder
     static Sequence SEQUENCE_BOOTSTRAP = new ArraySequence(
-            Type.getInternalName(Sequence.class), "sequenceBuilder",
+            Type.getInternalName(Bootstrapper.class), "sequenceBuilder",
             MethodType.methodType(CallSite.class, MethodHandles.Lookup.class, String.class,
                     MethodType.class).toMethodDescriptorString()
     );
@@ -124,8 +123,11 @@ public class Compiler {
             context.add(Assembler.LDC, ast.toString());
             context.add(MAKE_SYM);
         } else if(ast instanceof Keyword) {
-            context.add(Assembler.LDC, ((Keyword) ast).getValue());
-            context.add(MAKE_KEY);
+            context.add(Assembler.LDC,
+                    Sequence.makeList(
+                            ((Keyword) ast).getValue(),
+                            Type.getDescriptor(Keyword.class),
+                            KEY_HANDLE));
         } else if(ast instanceof Integer) {
             context.add(Assembler.ICONST, ast);
             context.add(PARSE_INT);
@@ -397,8 +399,11 @@ public class Compiler {
         } else if (ast instanceof String) {
             context.add(Assembler.LDC, ast);
         } else if (ast instanceof Keyword) {
-            context.add(Assembler.LDC, ((Keyword) ast).getValue());
-            context.add(MAKE_KEY);
+            context.add(Assembler.LDC,
+                    Sequence.makeList(
+                            ((Keyword) ast).getValue(),
+                            Type.getDescriptor(Keyword.class),
+                            KEY_HANDLE));
         } else {
             throw new RuntimeException(ast.toString());
         }
@@ -459,8 +464,23 @@ public class Compiler {
         return null;
     }
 
+    public static Object load(String filename) {
+        try {
+            LispReader lispReader = LispReader.fileReader(filename);
+            Object form;
+            while((form = lispReader.readForm()) != null) {
+                eval(form);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
     public static void main(String[] args) throws IOException {
-        LispReader lispReader = LispReader.fileReader("./src/lisp/core.lisp");
+        // LispReader lispReader = LispReader.fileReader("./src/lisp/core.lisp");
+        load("./src/lisp/core.lisp");
+        LispReader lispReader = LispReader.fileReader("./src/lisp/compiler.lisp");
         Object form;
         while((form = lispReader.readForm()) != null) {
             try {

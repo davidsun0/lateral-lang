@@ -1,4 +1,4 @@
-package io.github.whetfire.lateral;
+package lateral.lang;
 
 public class TypeException extends RuntimeException {
     TypeException(Class clazz) {
